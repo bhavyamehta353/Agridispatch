@@ -6,7 +6,7 @@ import {
   globalFreshnessLevel,
   globalFreshnessMessage,
   PRICING_TIMEZONE,
-} from "../../../lib/pricing-freshness";
+} from "../../../lib/date-freshness";
 import { NextResponse } from "next/server";
 
 type AirtableRecord = { id: string; get: (name: string) => unknown };

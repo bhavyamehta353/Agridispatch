@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { MapPinned, Truck } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import type { UserRole } from "../../lib/auth";
 
 const RecommendedRouteMap = dynamic(() => import("./recommended-route-map"), {
   ssr: false,
@@ -35,9 +36,6 @@ type MarketCol = {
     timeComponent: number;
     fixed: number;
   };
-  grossRevenue: number | null;
-  commissionAmount: number | null;
-  netRevenue: number | null;
   expectedProfit: number | null;
   feasible: boolean;
   decayRisk: "Low" | "Medium" | "High";
@@ -178,7 +176,13 @@ async function loadRecommendation(recordId: string): Promise<RecPayload> {
   return json;
 }
 
-export function RecommendationClient({ recordId }: { recordId: string }) {
+export function RecommendationClient({
+  recordId,
+  userRole,
+}: {
+  recordId: string;
+  userRole: UserRole | null;
+}) {
   const [data, setData] = useState<RecPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -331,11 +335,27 @@ export function RecommendationClient({ recordId }: { recordId: string }) {
       .filter((m) => m.marketId !== winnerId)
       .sort((a, b) => (b.expectedProfit ?? -1e9) - (a.expectedProfit ?? -1e9))[0]
       ?.marketName ?? "next best";
-  const routeMapReady =
-    data.routeWinner?.farmLat != null &&
+  const routeMapPoints =
+    data.routeWinner &&
+    data.routeWinner.farmLat != null &&
     data.routeWinner.farmLng != null &&
     data.routeWinner.marketLat != null &&
-    data.routeWinner.marketLng != null;
+    data.routeWinner.marketLng != null
+      ? {
+          farm: {
+            id: data.batch.farmOriginId ?? data.batch.recordId,
+            name: data.routeWinner.farmName,
+            lat: data.routeWinner.farmLat,
+            lng: data.routeWinner.farmLng,
+          },
+          market: {
+            id: winnerId ?? data.routeWinner.marketName,
+            name: data.routeWinner.marketName,
+            lat: data.routeWinner.marketLat,
+            lng: data.routeWinner.marketLng,
+          },
+        }
+      : null;
 
   return (
     <div className="pb-32">
@@ -499,19 +519,6 @@ export function RecommendationClient({ recordId }: { recordId: string }) {
                 {(
                   [
                     {
-                      label: "Modal (₹/kg)",
-                      fn: (m: MarketCol) => (
-                        <span className="inline-flex items-center gap-1">
-                          {m.modalPrice ?? "—"}
-                          {m.priceStale ? (
-                            <span className="text-amber-600" title="Stale price">
-                              !
-                            </span>
-                          ) : null}
-                        </span>
-                      ),
-                    },
-                    {
                       label: "Logistics (₹)",
                       fn: (m: MarketCol) => (
                         <span
@@ -521,18 +528,6 @@ export function RecommendationClient({ recordId }: { recordId: string }) {
                           {formatInr(m.logisticsCost)}
                         </span>
                       ),
-                    },
-                    {
-                      label: "Commission (₹)",
-                      fn: (m: MarketCol) => formatInr(m.commissionAmount),
-                    },
-                    {
-                      label: "Gross revenue (₹)",
-                      fn: (m: MarketCol) => formatInr(m.grossRevenue),
-                    },
-                    {
-                      label: "Net revenue (₹)",
-                      fn: (m: MarketCol) => formatInr(m.netRevenue),
                     },
                     {
                       label: "Expected profit (₹)",
@@ -609,20 +604,10 @@ export function RecommendationClient({ recordId }: { recordId: string }) {
                   </div>
                 </div>
                 <div className="mt-3 space-y-3">
-                  {routeMapReady ? (
+                  {routeMapPoints ? (
                     <RecommendedRouteMap
-                      farm={{
-                        id: data.batch.farmOriginId ?? data.batch.recordId,
-                        name: data.routeWinner.farmName,
-                        lat: data.routeWinner.farmLat,
-                        lng: data.routeWinner.farmLng,
-                      }}
-                      market={{
-                        id: winnerId ?? data.routeWinner.marketName,
-                        name: data.routeWinner.marketName,
-                        lat: data.routeWinner.marketLat,
-                        lng: data.routeWinner.marketLng,
-                      }}
+                      farm={routeMapPoints.farm}
+                      market={routeMapPoints.market}
                     />
                   ) : (
                     <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
@@ -693,6 +678,7 @@ export function RecommendationClient({ recordId }: { recordId: string }) {
               </div>
             ) : null}
 
+        {userRole === "admin" ? (
         <section className="rounded-xl border border-zinc-200 bg-white">
           <div className="border-b border-zinc-100 px-4 py-3 font-semibold text-zinc-900">
             Decision factors breakdown
@@ -740,6 +726,7 @@ export function RecommendationClient({ recordId }: { recordId: string }) {
             
           </div>
         </section>
+        ) : null}
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-zinc-200 bg-white/95 px-4 py-3 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] backdrop-blur sm:px-6">

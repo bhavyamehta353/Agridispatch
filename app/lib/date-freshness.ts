@@ -14,7 +14,7 @@ export type FreshnessLevel = "none" | "green" | "amber" | "red";
 
 export type CardStaleLevel = "ok" | "yesterday" | "stale";
 
-/** Days from reference calendar day to today (today − ref). 0 = same day. */
+/** Days from reference calendar day to today (today minus ref). 0 = same day. */
 export function calendarDaysBehind(
   referenceDay: string,
   todayDay: string
@@ -50,7 +50,7 @@ export function globalFreshnessMessage(
 ): { headline: string; detail?: string } {
   if (level === "none") {
     return {
-      headline: "No price data — enter prices to enable evaluations",
+      headline: "No price data - enter prices to enable evaluations",
       detail:
         "Add daily prices for each APMC market before running batch evaluation.",
     };
@@ -63,7 +63,7 @@ export function globalFreshnessMessage(
   if (level === "amber") {
     return {
       headline:
-        "Prices are 1 day old — consider updating before running evaluation",
+        "Prices are 1 day old - consider updating before running evaluation",
       detail:
         referenceDay != null
           ? `Latest shared arrival date in use: ${referenceDay}`
@@ -71,10 +71,10 @@ export function globalFreshnessMessage(
     };
   }
   return {
-    headline: "Price data is stale — evaluations may be unreliable",
+    headline: "Price data is stale - evaluations may be unreliable",
     detail:
       referenceDay != null
-        ? `Oldest “current” arrival date across markets: ${referenceDay} (today: ${todayDay})`
+        ? `Oldest current arrival date across markets: ${referenceDay} (today: ${todayDay})`
         : undefined,
   };
 }

@@ -1,4 +1,4 @@
-import { PRICING_TIMEZONE } from "./pricing-freshness";
+import { PRICING_TIMEZONE } from "./date-freshness";
 import { formatTrafficTimestamp } from "./traffic-freshness";
 
 export type EnvFreshnessLevel = "none" | "green" | "amber" | "red";

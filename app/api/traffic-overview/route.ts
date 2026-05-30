@@ -5,7 +5,7 @@ import {
   formatEnvTimestamp,
 } from "../../lib/environmental-freshness";
 import { ORIGINS, originByFarmOriginId } from "../../lib/origins";
-import { PRICING_TIMEZONE } from "../../lib/pricing-freshness";
+import { PRICING_TIMEZONE } from "../../lib/date-freshness";
 import {
   ageHoursSince,
   formatTrafficTimestamp,

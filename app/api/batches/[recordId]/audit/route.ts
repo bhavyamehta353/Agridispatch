@@ -3,7 +3,7 @@ import {
   calendarDayInTimeZone,
   calendarDaysBehind,
   PRICING_TIMEZONE,
-} from "../../../../lib/pricing-freshness";
+} from "../../../../lib/date-freshness";
 import { originByFarmOriginId } from "../../../../lib/origins";
 import { MATURITY_SWATCHES } from "../../../../lib/maturity";
 import { NextResponse } from "next/server";

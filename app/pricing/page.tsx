@@ -334,47 +334,7 @@ export default function MarketPricingPage() {
                   ) : null}
                 </div>
 
-                {hasData && m.latest ? (
-                  <>
-                    <p className="mt-4 text-4xl font-bold tabular-nums text-zinc-900">
-                      {formatInrKg(m.latest.modalPrice)}
-                    </p>
-                    <p className="mt-1 text-sm text-zinc-600">
-                      {formatInrKgRange(m.latest.minPrice, m.latest.maxPrice)}
-                    </p>
-                    <dl className="mt-4 space-y-1 text-sm text-zinc-600">
-                      <div className="flex justify-between gap-2">
-                        <dt>Arrival date</dt>
-                        <dd className="font-mono text-zinc-800">
-                          {m.latest.arrivalDay ?? "—"}
-                        </dd>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <dt>Arrivals</dt>
-                        <dd>{formatTonnes(m.latest.arrivalsTonnes)}</dd>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <dt>Commission</dt>
-                        <dd>{m.commissionDisplay}</dd>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <dt>Source</dt>
-                        <dd>{m.latest.source}</dd>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <dt>Entered at</dt>
-                        <dd className="text-xs">
-                          {formatEnteredAt(m.latest.createdTime)}
-                        </dd>
-                      </div>
-                    </dl>
-                  </>
-                ) : (
-                  <p className="mt-6 text-sm font-medium text-amber-800">
-                    No price data — enter prices to enable evaluations
-                  </p>
-                )}
-
+          
                 <button
                   type="button"
                   onClick={() => openEdit(m)}

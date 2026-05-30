@@ -1,4 +1,4 @@
-import { PRICING_TIMEZONE } from "./pricing-freshness";
+import { PRICING_TIMEZONE } from "./date-freshness";
 
 export type TrafficFreshnessLevel = "none" | "green" | "amber" | "red";
 
