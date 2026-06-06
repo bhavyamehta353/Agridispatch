@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { verifyAuthToken, type UserRole } from "../../lib/auth";
+import { verifyAuthToken } from "../../lib/auth";
 import { RecommendationClient } from "./recommendation-client";
 
 export default async function BatchDetailPage({
@@ -11,7 +11,7 @@ export default async function BatchDetailPage({
   const cookieStore = await cookies();
   const token = cookieStore.get("auth_token")?.value;
   const session = token ? verifyAuthToken(token) : null;
-  const userRole: UserRole | null = session?.role ?? null;
+  const userRole = session?.role ?? null;
 
   return (
     <div className="min-h-full bg-zinc-50 text-zinc-900">

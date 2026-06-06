@@ -128,6 +128,9 @@ export async function GET(
     const harvestTime = getField(batchRecord, "harvest_time");
     const status = String(getField(batchRecord, "status") ?? "Submitted");
     const qualityInitial = num(getField(batchRecord, "quality_initial"));
+    const maturityGrade = String(
+      getField(batchRecord, "maturity_grade") ?? "Light Red"
+    );
 
     const [
       handlingRecords,
@@ -445,6 +448,7 @@ export async function GET(
           : null,
         fillLevel: handling ? String(handling.get("fill_level") ?? "") : null,
         qualityTier,
+        maturityGrade,
       },
       evaluation: {
         hasEvaluation,
