@@ -3,7 +3,7 @@ import { MATURITY_SWATCHES } from "../../lib/maturity";
 import { originByFarmOriginId } from "../../lib/origins";
 import { NextRequest, NextResponse } from "next/server";
 
-export const Q_MIN = 0.65;
+const Q_MIN = 0.60;
 
 type AirtableRecord = {
   id: string;

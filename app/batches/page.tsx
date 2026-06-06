@@ -30,7 +30,6 @@ type OverviewRow = {
 type OverviewResponse = {
   stats: {
     totalBatches: number;
-    pendingEvaluation: number;
     dispatched: number;
     avgQualityPacked: number | null;
   };
@@ -98,7 +97,7 @@ function QualityCell({
         className="flex h-2 w-full max-w-[120px] overflow-hidden rounded bg-zinc-200"
         title={
           q < qMin
-            ? `Below minimum quality threshold (${qMin})`
+            ? "Below minimum quality threshold"
             : undefined
         }
       >
@@ -111,7 +110,7 @@ function QualityCell({
         className={`font-mono text-sm tabular-nums ${labelColor} inline-flex items-center gap-1`}
       >
         {q < qMin ? (
-          <span className="text-red-600" aria-label="Below Q_MIN">
+          <span className="text-red-600" aria-label="Below quality threshold">
             ⚠
           </span>
         ) : null}
@@ -197,19 +196,6 @@ export default function BatchOverviewPage() {
     }
   }
 
-  async function runEvaluation(recordId: string) {
-    setActionId(recordId);
-    try {
-      const res = await fetch(`/api/batches/${recordId}/evaluate`, {
-        method: "POST",
-      });
-      const j = (await res.json()) as { message?: string };
-      alert(j.message ?? (res.ok ? "OK" : "Evaluation not available"));
-    } finally {
-      setActionId(null);
-    }
-  }
-
   function toggleMaturity(m: string) {
     setMaturityPick((prev) => {
       const next = new Set(prev);
@@ -269,14 +255,6 @@ export default function BatchOverviewPage() {
             <p className="text-xs font-medium text-zinc-500">Total batches</p>
             <p className="mt-1 text-2xl font-bold tabular-nums">
               {stats?.totalBatches ?? "—"}
-            </p>
-          </div>
-          <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-medium text-zinc-500">
-              Pending evaluation
-            </p>
-            <p className="mt-1 text-2xl font-bold tabular-nums text-amber-700">
-              {stats?.pendingEvaluation ?? "—"}
             </p>
           </div>
           <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
@@ -538,26 +516,6 @@ export default function BatchOverviewPage() {
                             className="rounded bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
                           >
                             Mark dispatched
-                          </button>
-                        ) : null}
-                        {row.status === "Submitted" && row.evaluationPending ? (
-                          <button
-                            type="button"
-                            disabled={actionId === row.recordId}
-                            onClick={() => runEvaluation(row.recordId)}
-                            className="rounded bg-sky-600 px-2 py-1 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50"
-                          >
-                            Run evaluation
-                          </button>
-                        ) : null}
-                        {row.evaluationError ? (
-                          <button
-                            type="button"
-                            disabled={actionId === row.recordId}
-                            onClick={() => runEvaluation(row.recordId)}
-                            className="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
-                          >
-                            Retry
                           </button>
                         ) : null}
                       </div>
