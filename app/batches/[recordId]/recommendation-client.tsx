@@ -252,19 +252,6 @@ export function RecommendationClient({
     }
   }
 
-  async function rerunEval() {
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/batches/${recordId}/evaluate`, {
-        method: "POST",
-      });
-      const j = (await res.json()) as { message?: string };
-      alert(j.message ?? (res.ok ? "OK" : "Not available"));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   if (loading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center text-zinc-500">
@@ -310,14 +297,6 @@ export function RecommendationClient({
             Run the evaluation pipeline to compare markets and see a recommended
             dispatch.
           </p>
-          <button
-            type="button"
-            onClick={() => rerunEval()}
-            disabled={busy}
-            className="mt-6 rounded-xl bg-sky-600 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
-          >
-            Re-run Evaluation
-          </button>
           <Link
             href="/batches"
             className="mt-4 block text-sm text-sky-700 underline"
@@ -759,14 +738,6 @@ export function RecommendationClient({
                 </button>
               )
             ) : null}
-            <button
-              type="button"
-              onClick={() => rerunEval()}
-              disabled={busy}
-              className="rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
-            >
-              Re-run Evaluation
-            </button>
             <Link
               href="/batches"
               className="inline-flex items-center rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
