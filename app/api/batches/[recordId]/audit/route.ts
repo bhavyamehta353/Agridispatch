@@ -8,7 +8,7 @@ import { originByFarmOriginId } from "../../../../lib/origins";
 import { MATURITY_SWATCHES } from "../../../../lib/maturity";
 import { NextResponse } from "next/server";
 
-export const Q_MIN = 0.65;
+const Q_MIN = 0.60;
 const LOGISTICS_PER_KM = 12;
 const TIME_RATE = 150;
 const LOGISTICS_FIXED = 500;
@@ -177,7 +177,8 @@ export async function GET(
     const weightKg =
       num(getField(batchRecord, "weight_kg", "weight_harvest_kg")) ?? 0;
     const harvestTime = getField(batchRecord, "harvest_time");
-    const status = String(getField(batchRecord, "status") ?? "Submitted");
+    const rawStatus = String(getField(batchRecord, "Status", "status") ?? "").toLowerCase().trim();
+    const status = rawStatus === "dispatched" ? "Dispatched" : rawStatus === "evaluated" ? "Evaluated" : rawStatus === "error" ? "Error" : "Submitted";
     const qualityInitial = num(getField(batchRecord, "quality_initial"));
     const maturityGrade = String(
       getField(batchRecord, "maturity_grade", "maturity") ?? ""

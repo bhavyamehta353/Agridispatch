@@ -6,9 +6,9 @@ import {
 import { originByFarmOriginId } from "../../../../lib/origins";
 import { NextResponse } from "next/server";
 
-export const Q_MIN = 0.65;
-const LOGISTICS_PER_KM = 12;
-const TIME_RATE = 150;
+const Q_MIN = 0.60;
+const LOGISTICS_PER_KM = 18;
+const TIME_RATE = 160;
 const LOGISTICS_FIXED = 500;
 const TAU_MULT = 1.5;
 
@@ -87,8 +87,33 @@ function logisticsCost(distanceKm: number, tBaseHr: number, tau: number): number
   );
 }
 
+// tActualHr = t_base * (1 + tau) — actual travel time used in decay formula
+// effectiveTravelHours is only for the logistics cost time component
+function tActualHours(tBaseHr: number, tau: number): number {
+  return tBaseHr * (1 + tau);
+}
+
 function effectiveTravelHours(tBaseHr: number, tau: number): number {
   return tBaseHr * (1 + TAU_MULT * tau);
+}
+
+// Decay math (mirrors math_models.py)
+const K_REF = 0.015, T_REF = 25.0, BETA_TEMP = 0.08, DELTA_HUM = 0.00351, DELTA_VPD = 0.252462;
+const SEASONAL_FACTOR: Record<string, number> = {
+  Jan: 0.7465, Feb: 0.9368, Mar: 1.2625, Apr: 1.6207, May: 1.5692,
+  Jun: 1.0012, Jul: 0.7987, Aug: 0.7779, Sep: 0.7885, Oct: 0.9048,
+  Nov: 0.8516, Dec: 0.7416,
+};
+const MATURITY_DECAY_MAP: Record<string, number> = {
+  Breaker: 0.85, Turning: 0.90, Pink: 0.95, "Light Red": 1.00, "Red Ripe": 1.10,
+};
+function qualityArrival(qPacked: number, T: number, H: number, month: string, kMult: number, maturityGrade: string, tActualHr: number): number {
+  const es = 0.6108 * Math.exp((17.27 * T) / (T + 237.3));
+  const vpd = es * (1 - H / 100);
+  const hf = (1 + DELTA_HUM * H) * (1 + DELTA_VPD * vpd);
+  const kb = K_REF * (SEASONAL_FACTOR[month] ?? 1.0) * Math.exp(BETA_TEMP * (T - T_REF)) * hf;
+  const ke = kb * kMult * (MATURITY_DECAY_MAP[maturityGrade] ?? 1.0);
+  return Math.max(0, Math.min(1, qPacked * Math.exp(-ke * tActualHr)));
 }
 
 function decayBucket(score: number | null): "Low" | "Medium" | "High" {
@@ -126,7 +151,8 @@ export async function GET(
     const weightKg =
       num(getField(batchRecord, "weight_kg", "weight_harvest_kg")) ?? 0;
     const harvestTime = getField(batchRecord, "harvest_time");
-    const status = String(getField(batchRecord, "status") ?? "Submitted");
+    const rawStatus = String(getField(batchRecord, "Status", "status") ?? "").toLowerCase().trim();
+    const status = rawStatus === "dispatched" ? "Dispatched" : rawStatus === "evaluated" ? "Evaluated" : rawStatus === "error" ? "Error" : "Submitted";
     const qualityInitial = num(getField(batchRecord, "quality_initial"));
     const maturityGrade = String(
       getField(batchRecord, "maturity_grade") ?? "Light Red"
@@ -189,14 +215,16 @@ export async function GET(
         arrivalDay: arrivalDay(r.get("arrival_date")),
         arrivalRaw: r.get("arrival_date"),
         modal: num(r.get("modal_price")) ?? num(r.get("price_per_kg")),
+        min: num(r.get("min_price")) ?? num(r.get("min_price_per_kg")),
+        max: num(r.get("max_price")) ?? num(r.get("max_price_per_kg")),
         createdTime: rawCreatedTime(r),
       };
     });
 
-    const latestPriceByMarket = new Map<
-      string,
-      (typeof pricingParsed)[number]
-    >();
+    const latestPriceByMarket = new Map<string, (typeof pricingParsed)[number]>();
+    // anyPriceByMarket: fallback for records without arrival_date (treated as stale)
+    const anyPriceByMarket = new Map<string, (typeof pricingParsed)[number]>();
+
     const sortedP = [...pricingParsed]
       .filter((x) => x.marketId && x.arrivalDay)
       .sort((a, b) => {
@@ -207,6 +235,15 @@ export async function GET(
     for (const row of sortedP) {
       if (!latestPriceByMarket.has(row.marketId))
         latestPriceByMarket.set(row.marketId, row);
+    }
+
+    // Populate fallback from all pricing rows (including undated ones)
+    const sortedAny = [...pricingParsed]
+      .filter((x) => x.marketId && x.modal != null)
+      .sort((a, b) => (b.createdTime ?? "").localeCompare(a.createdTime ?? ""));
+    for (const row of sortedAny) {
+      if (!anyPriceByMarket.has(row.marketId))
+        anyPriceByMarket.set(row.marketId, row);
     }
 
     const todayDay = calendarDayInTimeZone(new Date(), PRICING_TIMEZONE);
@@ -258,13 +295,21 @@ export async function GET(
       const distanceKm = num(route?.get("distance_km")) ?? 0;
       const tBaseHr = num(route?.get("t_base_hr")) ?? 0;
       const tau = num(traffic?.get("tau")) ?? 0;
+      const tActualHr = tActualHours(tBaseHr, tau);
       const effTravel = effectiveTravelHours(tBaseHr, tau);
       const logi = logisticsCost(distanceKm, tBaseHr, tau);
 
-      const priceRow = latestPriceByMarket.get(m.id);
-      const modal = priceRow?.modal ?? null;
-      const priceStale =
-        priceRow?.arrivalDay != null && priceRow.arrivalDay < todayDay;
+      const priceRow = latestPriceByMarket.get(m.id) ?? anyPriceByMarket.get(m.id) ?? null;
+      // Fall back to prices stored in evaluation record when no pricing row exists at all
+      const evalModal = num(getField(ev as Rec, "modal_price", "price_per_kg", "modal_price_per_kg"));
+      const evalMin   = num(getField(ev as Rec, "min_price", "min_price_per_kg"));
+      const evalMax   = num(getField(ev as Rec, "max_price", "max_price_per_kg"));
+      const modal    = priceRow?.modal ?? evalModal ?? null;
+      const minPrice = priceRow?.min   ?? evalMin   ?? null;
+      const maxPrice = priceRow?.max   ?? evalMax   ?? null;
+      const priceStale = priceRow?.arrivalDay != null
+        ? priceRow.arrivalDay < todayDay
+        : modal != null; // undated or eval-sourced price is always stale
 
       const gross =
         modal != null && weightKg > 0 ? modal * weightKg : null;
@@ -283,8 +328,17 @@ export async function GET(
         netRev != null ? Math.round((netRev - logi) * 100) / 100 : null;
       const expectedProfit = storedProfit ?? computedProfit;
 
-      const feasible =
-        qualityPacked != null && qualityPacked >= Q_MIN;
+      const temperatureC = num(getField(risk as Rec, "temperature_c", "avg_temp_c"));
+      const humidityPct = num(getField(risk as Rec, "humidity_pct", "avg_humidity_pct"));
+      const harvestIso = harvestTime != null ? String(harvestTime) : null;
+      const harvestMonth = harvestIso
+        ? new Date(harvestIso).toLocaleString("en-US", { month: "short", timeZone: "Asia/Kolkata" })
+        : new Date().toLocaleString("en-US", { month: "short", timeZone: "Asia/Kolkata" });
+      const qArr =
+        qualityPacked != null && temperatureC != null && humidityPct != null
+          ? qualityArrival(qualityPacked, temperatureC, humidityPct, harvestMonth, kMultiplier, maturityGrade, tActualHr)
+          : null;
+      const feasible = qArr != null ? qArr >= Q_MIN : qualityPacked != null && qualityPacked >= Q_MIN;
 
       const decayRaw = num(
         getField(risk as Rec, "decay_risk_score", "decay_risk", "k_eff")
@@ -303,6 +357,7 @@ export async function GET(
         distanceKm,
         tBaseHr,
         tau,
+        tActualHr,
         effectiveTravelHr: effTravel,
         logisticsCost: Math.round(logi * 100) / 100,
         logisticsBreakdown: {
@@ -314,6 +369,8 @@ export async function GET(
             TIME_RATE * tBaseHr * (1 + TAU_MULT * tau),
           fixed: LOGISTICS_FIXED,
         },
+        minPrice,
+        maxPrice,
         grossRevenue: gross,
         commissionRate: rate,
         commissionAmount: commissionAmt,
@@ -322,12 +379,8 @@ export async function GET(
         feasible,
         decayRisk: decayBucketed,
         decayRaw,
-        temperatureC: num(
-          getField(risk as Rec, "temperature_c", "avg_temp_c")
-        ),
-        humidityPct: num(
-          getField(risk as Rec, "humidity_pct", "avg_humidity_pct")
-        ),
+        temperatureC,
+        humidityPct,
         activePriceRecordId: priceRow?.recordId ?? null,
       };
     });

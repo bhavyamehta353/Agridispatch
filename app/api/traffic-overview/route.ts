@@ -27,7 +27,7 @@ const LOGISTICS_PER_KM = 12;
 const TIME_RATE = 150;
 const LOGISTICS_FIXED = 500;
 const TAU_MULT = 1.5;
-const Q_MIN = 0.65;
+const Q_MIN = 0.60;
 
 type Rec = { id: string; get: (k: string) => unknown };
 

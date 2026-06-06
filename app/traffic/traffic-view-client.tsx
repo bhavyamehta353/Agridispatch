@@ -167,7 +167,7 @@ async function loadTrafficOverview(): Promise<OverviewPayload> {
       return {
         error: json.error ?? "Failed to load.",
         timeZone: "Asia/Kolkata",
-        qMin: 0.65,
+        qMin: 0.60,
         pageTone: "red",
         trafficFreshness: {
           level: "red",

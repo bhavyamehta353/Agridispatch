@@ -22,11 +22,14 @@ type MarketCol = {
   marketLat: number | null;
   marketLng: number | null;
   modalPrice: number | null;
+  minPrice: number | null;
+  maxPrice: number | null;
   priceArrivalDay: string | null;
   priceStale: boolean;
   distanceKm: number;
   tBaseHr: number;
   tau: number;
+  tActualHr: number;
   effectiveTravelHr: number;
   logisticsCost: number;
   logisticsBreakdown: {
@@ -151,6 +154,17 @@ function computeKEff(kb: number, kMult: number, maturityGrade: string): number {
 function computeQualityArrival(qPacked: number, ke: number, tHr: number): number {
   return Math.max(0, Math.min(1, qPacked * Math.exp(-ke * tHr)));
 }
+// math_models.py §11 — three-point linear interpolation of price by quality
+function qualityAdjustedPrice(q: number, pMin: number | null, pModal: number | null, pMax: number | null, qMin: number): number | null {
+  if (pModal == null) return null;
+  // Approximate min/max from modal when not available (±25% typical APMC spread)
+  const lo = pMin  ?? pModal * 0.75;
+  const hi = pMax  ?? pModal * 1.25;
+  if (q >= 0.85) return pModal + (hi - pModal) * (q - 0.85) / 0.15;
+  if (q >= qMin) return lo + (pModal - lo) * (q - qMin) / (0.85 - qMin);
+  return lo * 0.60; // distress sale
+}
+
 function harvestMonth(iso: string | null): string {
   const d = iso ? new Date(iso) : new Date();
   return Number.isNaN(d.getTime())
@@ -319,12 +333,20 @@ export function RecommendationClient({
     const ke    = computeKEff(kb, data.handling.kMultiplier, data.handling.maturityGrade);
 
     const markets = data.markets.map((m) => {
-      const qArr       = computeQualityArrival(data.handling.qualityPacked!, ke, m.effectiveTravelHr);
+      // Use actual travel time (tBase × (1+τ)) for decay — not the logistics-penalized effectiveTravelHr
+      const tDecayHr = m.tActualHr ?? m.tBaseHr * (1 + m.tau);
+      const qArr       = computeQualityArrival(data.handling.qualityPacked!, ke, tDecayHr);
       const simFeasible = qArr >= data.qMin;
-      // net_profit = gross × (1 − MARKET_FEE_PCT − COMMISSION_PCT) − logistics_cost
-      // math_models.py §6: MARKET_FEE_PCT=0.01, COMMISSION_PCT=0.025
-      const simProfit  = simFeasible && m.modalPrice != null
-        ? Math.round(m.modalPrice * data.batch.weightKg * (1 - MARKET_FEE_PCT - COMMISSION_PCT) - m.logisticsCost)
+      // Quality at arrival drives quality-adjusted price (math_models.py §11).
+      // Higher T/H → faster decay → lower qArr → lower effective price → lower profit.
+      // When no modal price is stored, back-calculate implied modal from stored expectedProfit.
+      const impliedModal = m.modalPrice == null && m.expectedProfit != null
+        ? (m.expectedProfit + m.logisticsCost) / (data.batch.weightKg * (1 - MARKET_FEE_PCT - COMMISSION_PCT))
+        : null;
+      const modalForSim = m.modalPrice ?? impliedModal;
+      const pEff = qualityAdjustedPrice(qArr, m.minPrice, modalForSim, m.maxPrice, data.qMin);
+      const simProfit = simFeasible && pEff != null
+        ? Math.round(pEff * data.batch.weightKg * (1 - MARKET_FEE_PCT - COMMISSION_PCT) - m.logisticsCost)
         : null;
       return { ...m, qArr, simFeasible, simProfit };
     });
@@ -399,8 +421,10 @@ export function RecommendationClient({
       : null;
 
   const simWinnerChanged =
-    simulation?.winner != null &&
-    simulation.winner.marketId !== winnerId;
+    simulation != null && (
+      (simulation.winner != null && simulation.winner.marketId !== winnerId) ||
+      (simulation.winner == null && winnerId != null)
+    );
 
   return (
     <div className="pb-32">
@@ -573,7 +597,7 @@ export function RecommendationClient({
                         label: "Logistics (₹)",
                         fn: (m: MarketCol) => (
                           <span
-                            title={`₹12×${m.logisticsBreakdown.distanceKm} + ₹150×${m.logisticsBreakdown.tBaseHr}×(1+1.5×${m.logisticsBreakdown.tau}) + ₹500 = ₹${m.logisticsCost.toFixed(2)}`}
+                            title={`₹18×${m.logisticsBreakdown.distanceKm} + ₹160×${m.logisticsBreakdown.tBaseHr}×(1+1.5×${m.logisticsBreakdown.tau}) + ₹500 = ₹${m.logisticsCost.toFixed(2)}`}
                             className="cursor-help border-b border-dotted border-zinc-400"
                           >
                             {formatInr(m.logisticsCost)}
@@ -723,39 +747,7 @@ export function RecommendationClient({
               </div>
             </div>
 
-            {/* Derived decay params */}
-            {simulation ? (
-              <div className="mt-5 grid grid-cols-2 gap-3 rounded-xl border border-zinc-100 bg-zinc-50 px-4 py-3 text-sm sm:grid-cols-4">
-                <div>
-                  <p className="text-xs text-zinc-500">VPD</p>
-                  <p className="font-mono tabular-nums">{simulation.vpd.toFixed(3)} kPa</p>
-                </div>
-                <div>
-                  <p className="text-xs text-zinc-500">k_base</p>
-                  <p className="font-mono tabular-nums">{simulation.kb.toFixed(5)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-zinc-500">k_eff</p>
-                  <p className="font-mono tabular-nums">{simulation.ke.toFixed(5)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-zinc-500">Season ({simulation.month})</p>
-                  <p className="font-mono tabular-nums">
-                    {(SEASONAL_FACTOR[simulation.month] ?? 1.0).toFixed(4)}
-                  </p>
-                </div>
-              </div>
-            ) : null}
 
-            <p className="mt-3 text-xs text-zinc-400">
-              k_base = K_REF({K_REF}) × S_month × exp(β({BETA_TEMP}) × (T − T_ref({T_REF}))) × (1 + δ_h·H) × (1 + δ_v·VPD)
-              &nbsp;·&nbsp;
-              Maturity: {data.handling.maturityGrade} (×{MATURITY_DECAY[data.handling.maturityGrade] ?? 1.0})
-              &nbsp;·&nbsp;
-              k_mult: {data.handling.kMultiplier.toFixed(3)}
-              &nbsp;·&nbsp;
-              Q_MIN = {qMin}
-            </p>
           </section>
 
           {/* Simulated recommendation */}
@@ -821,9 +813,6 @@ export function RecommendationClient({
               {/* Per-market impact table */}
               <section>
                 <h2 className="mb-3 text-lg font-bold text-zinc-900">Market impact</h2>
-                <p className="mb-3 text-xs text-zinc-500">
-                  Profit = modal_price × weight × (1 − {(MARKET_FEE_PCT * 100).toFixed(0)}% market fee − {(COMMISSION_PCT * 100).toFixed(1)}% commission) − logistics cost
-                </p>
                 <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white shadow-sm">
                   <table className="w-full min-w-[640px] border-collapse text-sm">
                     <thead>
@@ -834,7 +823,6 @@ export function RecommendationClient({
                         <th className="px-3 py-3 text-center">Feasible</th>
                         <th className="px-3 py-3 text-right">Sim profit</th>
                         <th className="px-3 py-3 text-right">Live profit</th>
-                        <th className="px-3 py-3 text-center">Status</th>
                       </tr>
                     </thead>
                     <tbody className="tabular-nums">
@@ -895,13 +883,6 @@ export function RecommendationClient({
                               m.feasible ? "text-zinc-900" : "text-zinc-400"
                             }`}>
                               {formatInr(m.expectedProfit)}
-                            </td>
-                            <td className="px-3 py-2.5 text-center">
-                              {feasChanged ? (
-                                <DecayBadge level={m.simFeasible ? "Low" : "High"} />
-                              ) : (
-                                <span className="text-xs text-zinc-400">—</span>
-                              )}
                             </td>
                           </tr>
                         );

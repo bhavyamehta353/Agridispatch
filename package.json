@@ -12,6 +12,7 @@
     "airtable": "^0.12.2",
     "bcryptjs": "^3.0.3",
     "leaflet": "^1.9.4",
+    "lightningcss-darwin-arm64": "^1.32.0",
     "lucide-react": "^1.7.0",
     "mongodb": "^7.2.0",
     "next": "16.2.2",

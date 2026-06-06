@@ -388,8 +388,7 @@ export function AuditViewClient({ recordId }: { recordId: string }) {
           </div>
           {data.pipeline.qualityComputed.warnBelowQMin ? (
             <p className="mt-2 text-sm text-red-700">
-              Packed quality is below Q_MIN ({data.qMin}) — dispatch should remain
-              blocked until quality improves or policy overrides apply.
+              Packed quality is below the minimum dispatch threshold — batch should not be dispatched until quality improves or a policy override applies.
             </p>
           ) : null}
         </section>
@@ -399,11 +398,11 @@ export function AuditViewClient({ recordId }: { recordId: string }) {
           <h3 className="mb-2 text-sm font-semibold text-zinc-800">Harvest</h3>
           <dl className="grid gap-2 text-sm sm:grid-cols-2">
             <div>
-              <dt className="text-zinc-500">batch_id</dt>
+              <dt className="text-zinc-500">Batch ID</dt>
               <dd className="font-mono">{data.harvest.batchId || "—"}</dd>
             </div>
             <div>
-              <dt className="text-zinc-500">farm_origin_id</dt>
+              <dt className="text-zinc-500">Farm</dt>
               <dd>
                 {data.harvest.farmDisplay}
                 {data.harvest.farmCoords ? (
@@ -415,11 +414,11 @@ export function AuditViewClient({ recordId }: { recordId: string }) {
               </dd>
             </div>
             <div>
-              <dt className="text-zinc-500">harvest_time</dt>
+              <dt className="text-zinc-500">Harvest time</dt>
               <dd>{formatHarvest(data.harvest.harvestTime)}</dd>
             </div>
             <div>
-              <dt className="text-zinc-500">weight_kg</dt>
+              <dt className="text-zinc-500">Weight</dt>
               <dd>
                 {data.harvest.weightKg != null
                   ? `${data.harvest.weightKg} kg`
@@ -427,7 +426,7 @@ export function AuditViewClient({ recordId }: { recordId: string }) {
               </dd>
             </div>
             <div>
-              <dt className="text-zinc-500">maturity_grade</dt>
+              <dt className="text-zinc-500">Maturity grade</dt>
               <dd className="flex items-center gap-2">
                 {data.harvest.maturityGrade ?? "—"}
                 {data.harvest.maturitySwatch ? (
@@ -440,11 +439,11 @@ export function AuditViewClient({ recordId }: { recordId: string }) {
               </dd>
             </div>
             <div>
-              <dt className="text-zinc-500">harvest_method</dt>
+              <dt className="text-zinc-500">Harvest method</dt>
               <dd>{data.harvest.harvestMethod ?? "—"}</dd>
             </div>
             <div>
-              <dt className="text-zinc-500">quality_initial</dt>
+              <dt className="text-zinc-500">Initial quality</dt>
               <dd>
                 {data.harvest.qualityInitial != null
                   ? data.harvest.qualityInitial.toFixed(3)
@@ -457,20 +456,12 @@ export function AuditViewClient({ recordId }: { recordId: string }) {
           </h3>
           <dl className="grid gap-2 text-sm sm:grid-cols-2">
             <div>
-              <dt className="text-zinc-500">packaging_type</dt>
+              <dt className="text-zinc-500">Packaging type</dt>
               <dd>{data.handling.packagingType ?? "—"}</dd>
             </div>
             <div>
-              <dt className="text-zinc-500">fill_level</dt>
+              <dt className="text-zinc-500">Fill level</dt>
               <dd>{data.handling.fillLevel ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-zinc-500">damage_factor</dt>
-              <dd>{df.toFixed(3)}</dd>
-            </div>
-            <div>
-              <dt className="text-zinc-500">sorting_bonus</dt>
-              <dd>{sb.toFixed(3)}</dd>
             </div>
           </dl>
           {data.handling.highDamageNote ? (
@@ -485,62 +476,35 @@ export function AuditViewClient({ recordId }: { recordId: string }) {
           {q.notComputed ? (
             <p className="text-sm text-zinc-600">Quality not yet computed.</p>
           ) : (
-            <>
-              <pre className="overflow-x-auto rounded-lg bg-zinc-50 p-3 text-xs leading-relaxed text-zinc-800">
-                {`quality_packed = quality_initial × (1 − 0.6 × damage_factor) × (1 + 0.2 × sorting_bonus)
-             = ${qi.toFixed(3)} × (1 − 0.6 × ${df.toFixed(3)}) × (1 + 0.2 × ${sb.toFixed(3)})
-             = ${q.formulaResult != null ? q.formulaResult.toFixed(3) : "—"}`}
-                {q.qualityPacked != null
-                  ? `\n(stored quality_packed: ${q.qualityPacked.toFixed(3)})`
-                  : ""}
-                {`\n\nk_multiplier = 1 + 0.8 × damage_factor
-             = 1 + 0.8 × ${df.toFixed(3)}
-             = ${q.kMultiplier.toFixed(3)}`}
-              </pre>
-              <table className="mt-4 w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-xs text-zinc-500">
-                    <th className="py-2 pr-2">Output</th>
-                    <th className="py-2 pr-2">Value</th>
-                    <th className="py-2">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="border-b border-zinc-100">
-                    <td className="py-2">quality_packed</td>
-                    <td className="tabular-nums">
-                      {q.qualityPacked != null ? q.qualityPacked.toFixed(3) : "—"}
-                    </td>
-                    <td>
-                      {q.qualityPacked == null
-                        ? "—"
-                        : q.qualityPacked >= data.qMin
-                          ? "✓ Above Q_MIN"
-                          : "✗ Below Q_MIN"}
-                    </td>
-                  </tr>
-                  <tr className="border-b border-zinc-100">
-                    <td className="py-2">k_multiplier</td>
-                    <td className="tabular-nums">{q.kMultiplier.toFixed(3)}</td>
-                    <td>—</td>
-                  </tr>
-                  <tr className="border-b border-zinc-100">
-                    <td className="py-2">Q_MIN</td>
-                    <td className="tabular-nums">{data.qMin}</td>
-                    <td>constant</td>
-                  </tr>
-                  <tr
-                    className={
-                      q.feasible ? "bg-emerald-50/80" : "bg-red-50/80"
-                    }
-                  >
-                    <td className="py-2 font-medium">Feasible for dispatch</td>
-                    <td className="py-2">{q.feasible ? "Yes" : "No"}</td>
-                    <td className="py-2">—</td>
-                  </tr>
-                </tbody>
-              </table>
-            </>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs text-zinc-500">
+                  <th className="py-2 pr-2">Output</th>
+                  <th className="py-2 pr-2">Value</th>
+                  <th className="py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-b border-zinc-100">
+                  <td className="py-2">Packed quality</td>
+                  <td className="tabular-nums">
+                    {q.qualityPacked != null ? q.qualityPacked.toFixed(3) : "—"}
+                  </td>
+                  <td>
+                    {q.qualityPacked == null
+                      ? "—"
+                      : q.qualityPacked >= data.qMin
+                        ? "✓ Meets standard"
+                        : "✗ Below standard"}
+                  </td>
+                </tr>
+                <tr className={q.feasible ? "bg-emerald-50/80" : "bg-red-50/80"}>
+                  <td className="py-2 font-medium">Eligible for dispatch</td>
+                  <td className="py-2">{q.feasible ? "Yes" : "No"}</td>
+                  <td className="py-2">—</td>
+                </tr>
+              </tbody>
+            </table>
           )}
         </section>
 
@@ -553,7 +517,7 @@ export function AuditViewClient({ recordId }: { recordId: string }) {
                   <th className="py-2 pr-2">Market</th>
                   <th className="py-2 pr-2">Distance (km)</th>
                   <th className="py-2 pr-2">Base (hr)</th>
-                  <th className="py-2 pr-2">τ</th>
+                  <th className="py-2 pr-2">Delay factor</th>
                   <th className="py-2 pr-2">Effective (hr)</th>
                   <th className="py-2 pr-2">Congestion</th>
                   <th className="py-2">Logistics (₹)</th>
@@ -583,20 +547,6 @@ export function AuditViewClient({ recordId }: { recordId: string }) {
                 ))}
               </tbody>
             </table>
-          </div>
-          <div className="mt-4 space-y-2 text-xs text-zinc-700">
-            {data.routes.map((r) => (
-              <p key={r.marketId} className="font-mono leading-relaxed">
-                <span className="font-sans font-medium text-zinc-600">
-                  {r.marketName}:{" "}
-                </span>
-                Cost = (₹12 × {r.distanceKm}) + ₹150 × {r.tBaseHr} × (1 + 1.5 ×{" "}
-                {r.logisticsFormula.tauUsed}) + ₹500 = {formatInr(r.logisticsCost)}
-                <span className="ml-2 text-zinc-500">
-                  (τ from {r.tauSource})
-                </span>
-              </p>
-            ))}
           </div>
         </section>
 
@@ -787,12 +737,24 @@ export function AuditViewClient({ recordId }: { recordId: string }) {
                   </tbody>
                 </table>
               </div>
-              <pre className="mt-4 rounded-lg bg-zinc-50 p-3 text-sm leading-relaxed text-zinc-800">
-                {`Recommended: ${data.evaluation.summary.recommendedMarket}
-Expected profit: ${formatInr(data.evaluation.summary.expectedProfit)}
-Margin over next best: ${data.evaluation.summary.marginOverNext != null ? formatInr(data.evaluation.summary.marginOverNext) : "—"}
-Evaluation run at: ${data.evaluation.summary.evaluationTimestamp ? formatHarvest(data.evaluation.summary.evaluationTimestamp) : "—"}`}
-              </pre>
+              <dl className="mt-4 grid gap-2 rounded-lg bg-zinc-50 p-3 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="text-zinc-500">Recommended market</dt>
+                  <dd className="font-medium">{data.evaluation.summary.recommendedMarket}</dd>
+                </div>
+                <div>
+                  <dt className="text-zinc-500">Expected profit</dt>
+                  <dd className="font-mono">{formatInr(data.evaluation.summary.expectedProfit)}</dd>
+                </div>
+                <div>
+                  <dt className="text-zinc-500">Margin over next best</dt>
+                  <dd className="font-mono">{data.evaluation.summary.marginOverNext != null ? formatInr(data.evaluation.summary.marginOverNext) : "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-zinc-500">Evaluated at</dt>
+                  <dd>{data.evaluation.summary.evaluationTimestamp ? formatHarvest(data.evaluation.summary.evaluationTimestamp) : "—"}</dd>
+                </div>
+              </dl>
             </>
           )}
         </section>

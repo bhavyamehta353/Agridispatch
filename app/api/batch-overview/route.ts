@@ -18,6 +18,14 @@ function getField(r: AirtableRecord, ...keys: string[]): unknown {
   return undefined;
 }
 
+function normalizeStatus(raw: unknown): string {
+  const s = String(raw ?? "").toLowerCase().trim();
+  if (s === "dispatched") return "Dispatched";
+  if (s === "evaluated") return "Evaluated";
+  if (s === "error") return "Error";
+  return "Submitted";
+}
+
 function farmerBatchIdText(r: AirtableRecord): string {
   const v = r.get("batch_id");
   if (v == null) return "";
@@ -173,7 +181,7 @@ export async function GET(request: NextRequest) {
     for (const br of batchRecords as unknown as AirtableRecord[]) {
       const evs = evaluationsForBatch(br);
       if (!evs.length) pendingEvaluationCount += 1;
-      const st = String(getField(br, "status") ?? "Submitted");
+      const st = normalizeStatus(getField(br, "Status", "status"));
       if (st === "Dispatched") dispatchedCount += 1;
     }
 
@@ -254,7 +262,7 @@ export async function GET(request: NextRequest) {
       const recommendedMarket = resolveRecommendedMarket(bestEv);
       const profit = expectedProfit(bestEv);
 
-      const status = String(getField(br, "status") ?? "Submitted");
+      const status = normalizeStatus(getField(br, "Status", "status"));
       const evaluationError = status === "Error";
 
       rowsUnsorted.push({
