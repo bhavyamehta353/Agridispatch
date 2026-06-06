@@ -40,7 +40,7 @@ export async function GET() {
         const mids = linkedIds(r.get("market_id"));
         return {
           marketId: mids[0] ?? "",
-          arrivalDay: arrivalCalendarDay(r.get("arrival_date")),
+          arrivalDay: arrivalCalendarDay(r.get("price_date") ?? r.get("arrival_date")),
         };
       }
     );

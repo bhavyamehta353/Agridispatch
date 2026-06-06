@@ -91,18 +91,18 @@ export async function GET(request: NextRequest) {
       (r) => {
         const mids = linkedIds(r.get("market_id"));
         const marketId = mids[0] ?? "";
-        const arrivalRaw = r.get("arrival_date");
+        const arrivalRaw = r.get("price_date");
         const arrivalDay = arrivalCalendarDay(arrivalRaw);
         return {
           recordId: r.id,
           marketId,
           arrivalRaw,
           arrivalDay,
-          modalPrice: num(r.get("modal_price")) ?? num(r.get("price_per_kg")),
-          minPrice: num(r.get("min_price")),
-          maxPrice: num(r.get("max_price")),
-          arrivalsTonnes: num(r.get("arrivals_tonnes")),
-          source: String(r.get("source") ?? "Manual"),
+          modalPrice: num(r.get("price_modal")) ?? num(r.get("modal_price")) ?? num(r.get("price_per_kg")),
+          minPrice: num(r.get("price_min")) ?? num(r.get("min_price")),
+          maxPrice: num(r.get("price_max")) ?? num(r.get("max_price")),
+          arrivalsTonnes: null as number | null,
+          source: String(r.get("source") ?? "Agmarknet"),
           createdTime: rawCreatedTime(r),
         };
       }
@@ -232,8 +232,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-const SOURCE_VALUES = new Set(["Manual", "Agmarknet"]);
-
 export async function POST(request: Request) {
   if (!process.env.AIRTABLE_API_KEY || !process.env.AIRTABLE_BASE_ID) {
     return NextResponse.json(
@@ -248,8 +246,6 @@ export async function POST(request: Request) {
     modal_price?: number;
     min_price?: number;
     max_price?: number;
-    arrivals_tonnes?: number;
-    source?: string;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -280,7 +276,6 @@ export async function POST(request: Request) {
   const minP = num(body.min_price);
   const maxP = num(body.max_price);
   const modalP = num(body.modal_price);
-  const arrivals = num(body.arrivals_tonnes);
 
   if (minP == null || maxP == null || modalP == null) {
     return NextResponse.json(
@@ -300,29 +295,13 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-  if (arrivals == null || arrivals <= 0) {
-    return NextResponse.json(
-      { error: "arrivals_tonnes must be a positive number." },
-      { status: 400 }
-    );
-  }
-
-  const source = body.source ?? "Manual";
-  if (!SOURCE_VALUES.has(source)) {
-    return NextResponse.json(
-      { error: "source must be Manual or Agmarknet." },
-      { status: 400 }
-    );
-  }
 
   const fields: FieldSet = {
     market_id: [marketId],
-    arrival_date: body.arrival_date,
-    modal_price: modalP,
-    min_price: minP,
-    max_price: maxP,
-    arrivals_tonnes: arrivals,
-    source,
+    price_date: body.arrival_date,
+    price_modal: modalP,
+    price_min: minP,
+    price_max: maxP,
   };
 
   try {
