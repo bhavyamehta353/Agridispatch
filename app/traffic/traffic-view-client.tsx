@@ -835,7 +835,7 @@ export function TrafficViewClient() {
                 </div>
               </dl>
               <div className="mt-4 rounded-xl bg-slate-50 p-3 font-mono text-xs leading-relaxed">
-                Cost = (₹12 × {drawerRoute.distanceKm}) + ₹150 ×{" "}
+                Cost = (₹18 × {drawerRoute.distanceKm}) + ₹160 ×{" "}
                 {drawerRoute.tBaseHr} × (1 + 1.5 ×{" "}
                 {drawerRoute.logisticsBreakdown.tauUsed}) + ₹500 ={" "}
                 {formatInr(drawerRoute.logisticsCost)}
