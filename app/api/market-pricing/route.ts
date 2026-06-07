@@ -112,6 +112,10 @@ export async function GET(request: NextRequest) {
       string,
       (typeof pricingRows)[number]
     >();
+    const secondLatestByMarket = new Map<
+      string,
+      (typeof pricingRows)[number]
+    >();
     const sortedForLatest = [...pricingRows].sort((a, b) => {
       const ad = a.arrivalDay ?? "";
       const bd = b.arrivalDay ?? "";
@@ -122,7 +126,11 @@ export async function GET(request: NextRequest) {
     });
     for (const row of sortedForLatest) {
       if (!row.marketId) continue;
-      if (!latestByMarket.has(row.marketId)) latestByMarket.set(row.marketId, row);
+      if (!latestByMarket.has(row.marketId)) {
+        latestByMarket.set(row.marketId, row);
+      } else if (!secondLatestByMarket.has(row.marketId)) {
+        secondLatestByMarket.set(row.marketId, row);
+      }
     }
 
     const latestDaysWithData = [...latestByMarket.values()]
@@ -165,6 +173,7 @@ export async function GET(request: NextRequest) {
               source: latest.source,
               createdTime: latest.createdTime,
               cardStaleLevel: cardStale,
+              previousModalPrice: secondLatestByMarket.get(m.id)?.modalPrice ?? null,
             }
           : null,
       };
