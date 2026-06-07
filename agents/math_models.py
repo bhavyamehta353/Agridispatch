@@ -324,7 +324,7 @@ def dispatch_window_hr(Q_packed: float, ke: float, q_min: float = P.Q_min) -> fl
     How many hours until quality drops to Q_MIN.
     dispatch_window_hr = -ln(Q_MIN / quality_packed) / k_eff
     """
-    if ke <= 0 or Q_packed <= 0:
+    if ke <= 0 or Q_packed <= 0 or Q_packed <= q_min:
         return 0.0
     return round(-math.log(q_min / Q_packed) / ke, 4)
 
