@@ -1,17 +1,9 @@
+export const revalidate = 60; // cache API response for 60 seconds
+
 import base from "../../lib/airtable";
-import {
-  environmentalDataFreshnessLevel,
-  environmentalFreshnessCopy,
-  formatEnvTimestamp,
-} from "../../lib/environmental-freshness";
 import { ORIGINS, originByFarmOriginId } from "../../lib/origins";
 import { PRICING_TIMEZONE } from "../../lib/date-freshness";
-import {
-  ageHoursSince,
-  formatTrafficTimestamp,
-  trafficDataFreshnessLevel,
-  trafficFreshnessCopy,
-} from "../../lib/traffic-freshness";
+import { formatTrafficTimestamp } from "../../lib/traffic-freshness";
 import {
   combinedHealthRank,
   combinedRouteHealth,
@@ -23,8 +15,8 @@ import {
 } from "../../lib/route-conditions-health";
 import { NextResponse } from "next/server";
 
-const LOGISTICS_PER_KM = 12;
-const TIME_RATE = 150;
+const LOGISTICS_PER_KM = 18;
+const TIME_RATE = 160;
 const LOGISTICS_FIXED = 500;
 const TAU_MULT = 1.5;
 const Q_MIN = 0.60;
@@ -109,17 +101,19 @@ function effectiveTravelHours(tBaseHr: number, tau: number): number {
   return tBaseHr * (1 + TAU_MULT * tau);
 }
 
-function freshnessToneRank(
-  level: "none" | "green" | "amber" | "red"
-): number {
-  if (level === "red") return 3;
-  if (level === "amber") return 2;
-  if (level === "green") return 1;
-  return 3;
+type Reliability = "consistent" | "variable" | "unpredictable" | "insufficient_data";
+
+function tauReliability(tauValues: number[]): Reliability {
+  if (tauValues.length < 3) return "insufficient_data";
+  const mean = tauValues.reduce((s, t) => s + t, 0) / tauValues.length;
+  const variance = tauValues.reduce((s, t) => s + (t - mean) ** 2, 0) / tauValues.length;
+  const stdDev = Math.sqrt(variance);
+  if (stdDev < 0.1) return "consistent";
+  if (stdDev < 0.25) return "variable";
+  return "unpredictable";
 }
 
 export async function GET() {
-  const now = new Date();
   try {
     const [
       routeRecords,
@@ -131,12 +125,12 @@ export async function GET() {
       handlingRecords,
     ] = await Promise.all([
       base("Route_Reference").select().all(),
-      base("Traffic_Estimates").select().all(),
-      base("Environmental_Risk").select().all(),
+      base("Traffic_Estimates").select({ maxRecords: 500 }).all(),
+      base("Environmental_Risk").select({ maxRecords: 500 }).all(),
       base("Markets").select().all(),
-      base("Farmer_Batches").select().all(),
-      base("Market_Evaluation").select().all(),
-      base("Handling_Quality").select().all(),
+      base("Farmer_Batches").select({ maxRecords: 500 }).all(),
+      base("Market_Evaluation").select({ maxRecords: 300 }).all(),
+      base("Handling_Quality").select({ maxRecords: 500 }).all(),
     ]);
 
     const routes = routeRecords as unknown as Rec[];
@@ -167,6 +161,28 @@ export async function GET() {
         marketIdByNameLc.set(n.toLowerCase(), m.id);
     }
 
+    // Build batch record ID → origin_id map so we can resolve
+    // traffic/env pair_keys (which use batch_id) to origin_id keys
+    // that match Route_Reference pair_keys (which use origin_id).
+    const originByBatchRecordId = new Map<string, string>();
+    for (const b of batches) {
+      const oid = String(getField(b, "origin_id", "farm_origin_id") ?? "").trim();
+      if (oid) originByBatchRecordId.set(b.id, oid);
+    }
+
+    function resolveOriginFromRecord(rec: Rec): string {
+      // Prefer explicit farm_id / origin_key on the record itself
+      const direct = String(getField(rec, "farm_id", "origin_key") ?? "").trim();
+      if (direct) return direct;
+      // Fall back: derive from linked batch_id
+      const bids = linkedIds(rec.get("batch_id"));
+      for (const bid of bids) {
+        const oid = originByBatchRecordId.get(bid);
+        if (oid) return oid;
+      }
+      return "";
+    }
+
     type TrafficRow = {
       id: string;
       matchKey: string;
@@ -175,37 +191,32 @@ export async function GET() {
     };
 
     const trafficRows: TrafficRow[] = [];
-    let trafficLatestIso: string | null = null;
+    // batch record id → traffic rows for that batch (for dispatch history lookup)
+    const trafficByBatchRecId = new Map<string, TrafficRow[]>();
+    let lastRunIso: string | null = null;
 
     for (const t of traffic) {
       const ct = rawCreatedTime(t);
       if (!ct) continue;
-      if (!trafficLatestIso || ct > trafficLatestIso) trafficLatestIso = ct;
+      if (!lastRunIso || ct > lastRunIso) lastRunIso = ct;
 
-      const pairKey = String(t.get("pair_key") ?? "");
-      const farmKey = String(
-        getField(t, "farm_id", "origin_key") ?? ""
-      ).trim();
       const mids = linkedIds(t.get("market_id"));
       const tau = num(t.get("tau"));
-      if (mids.length === 0 && !normKey(pairKey)) continue;
+      if (mids.length === 0) continue;
 
-      if (mids.length === 0) {
-        trafficRows.push({
-          id: t.id,
-          matchKey: normKey(pairKey),
-          tau,
-          createdTime: ct,
-        });
-        continue;
-      }
+      const originKey = resolveOriginFromRecord(t);
+      if (!originKey) continue;
+
+      const bids = linkedIds(t.get("batch_id"));
+
       for (const mid of mids) {
-        trafficRows.push({
-          id: t.id,
-          matchKey: matchKeyFromParts(pairKey, farmKey, mid),
-          tau,
-          createdTime: ct,
-        });
+        const row: TrafficRow = { id: t.id, matchKey: `${originKey}::${mid}`, tau, createdTime: ct };
+        trafficRows.push(row);
+        for (const bid of bids) {
+          const list = trafficByBatchRecId.get(bid) ?? [];
+          list.push(row);
+          trafficByBatchRecId.set(bid, list);
+        }
       }
     }
 
@@ -219,43 +230,34 @@ export async function GET() {
     };
 
     const envRowsParsed: EnvRow[] = [];
-    let envLatestIso: string | null = null;
+    // batch record id → env rows for that batch (for dispatch history lookup)
+    const envByBatchRecId = new Map<string, EnvRow[]>();
 
     for (const r of envAll) {
       const ct = rawCreatedTime(r);
       if (!ct) continue;
-      if (!envLatestIso || ct > envLatestIso) envLatestIso = ct;
+      if (!lastRunIso || ct > lastRunIso) lastRunIso = ct;
 
-      const pairKey = String(r.get("pair_key") ?? "");
-      const farmKey = String(
-        getField(r, "farm_id", "origin_key") ?? ""
-      ).trim();
       const mids = linkedIds(r.get("market_id"));
-      if (mids.length === 0 && !normKey(pairKey)) continue;
+      if (mids.length === 0) continue;
 
-      const temperatureC = num(
-        getField(r, "temperature_c", "avg_temp_c")
-      );
-      const humidityPct = num(
-        getField(r, "humidity_pct", "avg_humidity_pct")
-      );
-      const decayScore = num(
-        getField(r, "decay_risk_score", "decay_risk", "k_eff")
-      );
+      const originKey = resolveOriginFromRecord(r);
+      if (!originKey) continue;
 
-      const push = (mk: string) => {
-        envRowsParsed.push({
-          id: r.id,
-          matchKey: mk,
-          temperatureC,
-          humidityPct,
-          decayScore,
-          createdTime: ct,
-        });
-      };
+      const bids = linkedIds(r.get("batch_id"));
+      const temperatureC = num(getField(r, "temperature_c", "avg_temp_c"));
+      const humidityPct = num(getField(r, "humidity_pct", "avg_humidity_pct"));
+      const decayScore = num(getField(r, "decay_risk_score", "decay_risk", "k_eff"));
 
-      if (mids.length === 0) push(normKey(pairKey));
-      else for (const mid of mids) push(matchKeyFromParts(pairKey, farmKey, mid));
+      for (const mid of mids) {
+        const row: EnvRow = { id: r.id, matchKey: `${originKey}::${mid}`, temperatureC, humidityPct, decayScore, createdTime: ct };
+        envRowsParsed.push(row);
+        for (const bid of bids) {
+          const list = envByBatchRecId.get(bid) ?? [];
+          list.push(row);
+          envByBatchRecId.set(bid, list);
+        }
+      }
     }
 
     const trafficByKey = new Map<string, TrafficRow[]>();
@@ -278,32 +280,7 @@ export async function GET() {
       list.sort((a, b) => b.createdTime.localeCompare(a.createdTime));
     }
 
-    const trafficAgeHours = trafficLatestIso
-      ? ageHoursSince(trafficLatestIso, now)
-      : null;
-    const trafficLevel =
-      trafficRows.length === 0
-        ? ("none" as const)
-        : trafficDataFreshnessLevel(trafficAgeHours);
-    const trafficMsg = trafficFreshnessCopy(
-      trafficLevel,
-      trafficLatestIso ? formatTrafficTimestamp(trafficLatestIso) : null
-    );
-
-    const envAgeHours = envLatestIso ? ageHoursSince(envLatestIso, now) : null;
-    const envLevel =
-      envRowsParsed.length === 0
-        ? ("none" as const)
-        : environmentalDataFreshnessLevel(envAgeHours);
-    const envMsg = environmentalFreshnessCopy(
-      envLevel,
-      envLatestIso ? formatEnvTimestamp(envLatestIso) : null
-    );
-
-    const pageTone =
-      freshnessToneRank(trafficLevel) >= freshnessToneRank(envLevel)
-        ? trafficLevel
-        : envLevel;
+    const lastRunDisplay = lastRunIso ? formatTrafficTimestamp(lastRunIso) : null;
 
     type RouteOut = {
       routeRecordId: string;
@@ -342,6 +319,10 @@ export async function GET() {
         humidityPct: number | null;
       }[];
       combinedHealth: CombinedRouteHealth;
+      avgLogisticsCost: number | null;
+      avgDecayScore: number | null;
+      reliability: Reliability;
+      tauRecordCount: number;
     };
 
     const routeOutList: RouteOut[] = [];
@@ -353,7 +334,9 @@ export async function GET() {
       ).trim();
       const mids = linkedIds(r.get("market_id"));
       const marketId = mids[0] ?? "";
-      const mk = matchKeyFromParts(pairKeyRaw, farmKey, marketId);
+      if (!farmKey || !marketId) continue;
+      // Match key must align with how traffic/env rows are keyed: originKey::marketRecordId
+      const mk = `${farmKey}::${marketId}`;
       const origin = farmKey ? originByFarmOriginId(farmKey) : undefined;
       const farmName =
         origin?.origin_name ??
@@ -404,6 +387,22 @@ export async function GET() {
         hasEnvData
       );
 
+      const allTaus = histT.map((h) => h.tau).filter((t): t is number => t != null);
+      const avgLogisticsCost =
+        allTaus.length > 0
+          ? Math.round(
+              (allTaus.reduce((sum, t) => sum + logisticsCost(distanceKm, tBaseHr, t), 0) /
+                allTaus.length) *
+                100
+            ) / 100
+          : null;
+      const allDecays = histE.map((h) => h.decayScore).filter((d): d is number => d != null);
+      const avgDecayScore =
+        allDecays.length > 0
+          ? allDecays.reduce((sum, d) => sum + d, 0) / allDecays.length
+          : null;
+      const reliability = tauReliability(allTaus);
+
       routeOutList.push({
         routeRecordId: r.id,
         pairKey: normKey(pairKeyRaw) || null,
@@ -426,7 +425,7 @@ export async function GET() {
           fixed: LOGISTICS_FIXED,
           tauUsed,
         },
-        tauHistory: histT.slice(0, 5).map((h) => ({
+        tauHistory: histT.map((h) => ({
           recordId: h.id,
           createdTime: h.createdTime,
           tau: h.tau,
@@ -437,7 +436,7 @@ export async function GET() {
         hasEnvData,
         decayLevel,
         lastEnvIso: latestE?.createdTime ?? null,
-        envHistory: histE.slice(0, 5).map((h) => ({
+        envHistory: histE.map((h) => ({
           recordId: h.id,
           createdTime: h.createdTime,
           decayScore: h.decayScore,
@@ -445,6 +444,10 @@ export async function GET() {
           humidityPct: h.humidityPct,
         })),
         combinedHealth,
+        avgLogisticsCost,
+        avgDecayScore,
+        reliability,
+        tauRecordCount: allTaus.length,
       });
     }
 
@@ -460,6 +463,11 @@ export async function GET() {
       if (fo !== 0) return fo;
       return a.marketName.localeCompare(b.marketName);
     });
+
+    const routeByFarmAndMarket = new Map<string, RouteOut>();
+    for (const ro of routeOutList) {
+      routeByFarmAndMarket.set(`${ro.farmOriginId}::${ro.marketId}`, ro);
+    }
 
     let worstRoute: string | null = null;
     let worstRank = 0;
@@ -537,33 +545,38 @@ export async function GET() {
       );
     }
 
-    type Exposure = {
+    type HistoryRow = {
       batchRecordId: string;
       batchId: string;
       farmName: string;
       farmOriginId: string | null;
+      harvestTime: string | null;
+      harvestTimeDisplay: string;
       status: string;
       recommendedMarket: string | null;
       congestion: CongestionLevel;
       decayLevel: DecayLevel;
+      tau: number | null;
+      temperatureC: number | null;
+      humidityPct: number | null;
       qualityPacked: number | null;
-      exposureNote: string;
-      exposureRank: number;
+      logisticsCost: number | null;
     };
 
-    const exposure: Exposure[] = [];
+    const history: HistoryRow[] = [];
 
     for (const br of batches) {
       const status = String(getField(br, "status") ?? "Submitted");
-      if (status !== "Submitted" && status !== "Evaluated") continue;
-
-      const fid = String(
-        getField(br, "farm_origin_id", "origin_id") ?? ""
-      ).trim();
+      const fid = String(getField(br, "farm_origin_id", "origin_id") ?? "").trim();
       const origin = fid ? originByFarmOriginId(fid) : undefined;
       const farmName =
         origin?.origin_name ??
         String((getField(br, "origin_name") ?? fid) || "—");
+
+      const harvestTime = String(getField(br, "harvest_time") ?? "");
+      const harvestTimeDisplay = harvestTime
+        ? formatTrafficTimestamp(harvestTime)
+        : "—";
 
       const evList = evaluationsForBatch(br);
       const recMarket = resolveRecommendedMarket(evList);
@@ -571,61 +584,58 @@ export async function GET() {
         ? marketIdByNameLc.get(recMarket.toLowerCase()) ?? null
         : null;
 
-      const ro =
-        recMid != null
-          ? routeOutList.find(
-              (x) =>
-                (x.farmOriginId === fid ||
-                  x.farmOriginId === origin?.farm_origin_id) &&
-                x.marketId === recMid
-            )
-          : undefined;
+      // Look up the traffic/env conditions captured for THIS batch specifically
+      const batchTraffic = trafficByBatchRecId.get(br.id) ?? [];
+      const batchEnv = envByBatchRecId.get(br.id) ?? [];
 
-      const congestion = ro?.congestion ?? "unknown";
-      const decayLevel = ro?.decayLevel ?? "unknown";
+      // Find the record for the recommended market, or fall back to any record
+      const tRec = recMid
+        ? (batchTraffic.find((r) => r.matchKey.endsWith(`::${recMid}`)) ?? batchTraffic[0])
+        : batchTraffic[0];
+      const eRec = recMid
+        ? (batchEnv.find((r) => r.matchKey.endsWith(`::${recMid}`)) ?? batchEnv[0])
+        : batchEnv[0];
+
+      const tau = tRec?.tau ?? null;
+      const congestion = congestionFromTau(tau);
+      const decayScore = eRec?.decayScore ?? null;
+      const decayLevel = decayFromScore(decayScore);
+
       const handling = findHandlingForBatch(br);
       const qualityPacked = num(handling?.get("quality_packed"));
 
-      let exposureNote = "";
-      let exposureRank = 0;
+      const routeForBatch =
+        fid && recMid ? routeByFarmAndMarket.get(`${fid}::${recMid}`) : null;
+      const batchLogisticsCost =
+        tau != null && routeForBatch
+          ? Math.round(
+              logisticsCost(routeForBatch.distanceKm, routeForBatch.tBaseHr, tau) * 100
+            ) / 100
+          : null;
 
-      const q = qualityPacked;
-      const highCong = congestion === "high";
-      const highDecay = decayLevel === "high";
-
-      if (highCong && highDecay) {
-        exposureNote =
-          "⚠ Critical exposure — both route conditions are poor";
-        exposureRank = 100;
-      } else if (q != null && q < Q_MIN) {
-        exposureNote = "✗ Below Q_MIN — do not dispatch regardless of route conditions";
-        exposureRank = 90;
-      } else if (highDecay && q != null && q < 0.75) {
-        exposureNote =
-          "⚠ Vulnerable batch on a high-risk route";
-        exposureRank = 80;
-      } else if (highCong) {
-        exposureNote =
-          "Logistics cost will be significantly elevated — re-run evaluation with current traffic";
-        exposureRank = 50;
-      }
-
-      exposure.push({
+      history.push({
         batchRecordId: br.id,
         batchId: farmerBatchIdText(br) || br.id,
         farmName,
         farmOriginId: fid || null,
+        harvestTime: harvestTime || null,
+        harvestTimeDisplay,
         status,
         recommendedMarket: recMarket,
         congestion,
         decayLevel,
+        tau,
+        temperatureC: eRec?.temperatureC ?? null,
+        humidityPct: eRec?.humidityPct ?? null,
         qualityPacked,
-        exposureNote,
-        exposureRank,
+        logisticsCost: batchLogisticsCost,
       });
     }
 
-    exposure.sort((a, b) => b.exposureRank - a.exposureRank);
+    // Most recent harvest first
+    history.sort((a, b) =>
+      (b.harvestTime ?? "").localeCompare(a.harvestTime ?? "")
+    );
 
     const farmGroups: {
       farmOriginId: string;
@@ -666,27 +676,8 @@ export async function GET() {
     return NextResponse.json({
       timeZone: PRICING_TIMEZONE,
       qMin: Q_MIN,
-      pageTone,
-      trafficFreshness: {
-        level: trafficLevel,
-        headline: trafficMsg.headline,
-        detail: trafficMsg.detail,
-        lastUpdatedIso: trafficLatestIso,
-        ageHours: trafficAgeHours,
-        lastUpdatedDisplay: trafficLatestIso
-          ? formatTrafficTimestamp(trafficLatestIso)
-          : null,
-      },
-      envFreshness: {
-        level: envLevel,
-        headline: envMsg.headline,
-        detail: envMsg.detail,
-        lastUpdatedIso: envLatestIso,
-        ageHours: envAgeHours,
-        lastUpdatedDisplay: envLatestIso
-          ? formatEnvTimestamp(envLatestIso)
-          : null,
-      },
+      lastRunIso,
+      lastRunDisplay,
       summary: {
         traffic: countCongestion,
         environment: countDecay,
@@ -700,7 +691,7 @@ export async function GET() {
         markets: mapMarkets.filter((x) => x.lat != null && x.lng != null),
       },
       farms: farmGroups,
-      exposure,
+      history,
     });
   } catch (err: unknown) {
     const message =
