@@ -14,7 +14,7 @@ export default async function BatchDetailPage({
   const userRole = session?.role ?? null;
 
   return (
-    <div className="min-h-full bg-zinc-50 text-zinc-900">
+    <div className="min-h-full bg-zinc-950 text-zinc-100">
       <RecommendationClient recordId={recordId} userRole={userRole} />
     </div>
   );

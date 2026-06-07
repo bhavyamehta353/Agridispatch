@@ -9,8 +9,8 @@ import { MATURITY_SWATCHES } from "../../../../lib/maturity";
 import { NextResponse } from "next/server";
 
 const Q_MIN = 0.60;
-const LOGISTICS_PER_KM = 12;
-const TIME_RATE = 150;
+const LOGISTICS_PER_KM = 18;
+const TIME_RATE = 160;
 const LOGISTICS_FIXED = 500;
 const TAU_MULT = 1.5;
 
@@ -102,8 +102,8 @@ function congestionFromTau(tau: number | null): "low" | "moderate" | "high" | "u
 
 function decayBucket(score: number | null): "Low" | "Medium" | "High" {
   if (score == null) return "Medium";
-  if (score < 0.34) return "Low";
-  if (score < 0.67) return "Medium";
+  if (score < 0.025) return "Low";
+  if (score < 0.05) return "Medium";
   return "High";
 }
 
@@ -208,13 +208,13 @@ export async function GET(
       trafficRecords,
       riskRecords,
     ] = await Promise.all([
-      base("Handling_Quality").select().all(),
-      base("Market_Evaluation").select().all(),
+      base("Handling_Quality").select({ filterByFormula: `{batch_id} = "${bidText}"`, maxRecords: 5 }).all(),
+      base("Market_Evaluation").select({ filterByFormula: `{batch_id} = "${bidText}"`, maxRecords: 10 }).all(),
       base("Markets").select().all(),
-      base("Market_Pricing").select().all(),
+      base("Market_Pricing").select({ maxRecords: 200 }).all(),
       base("Route_Reference").select().all(),
-      base("Traffic_Estimates").select().all(),
-      base("Environmental_Risk").select().all(),
+      base("Traffic_Estimates").select({ filterByFormula: `{batch_id} = "${bidText}"`, maxRecords: 10 }).all(),
+      base("Environmental_Risk").select({ filterByFormula: `{batch_id} = "${bidText}"`, maxRecords: 10 }).all(),
     ]);
 
     const handling = (handlingRecords as unknown as Rec[]).find((h) =>
@@ -290,11 +290,11 @@ export async function GET(
       return {
         recordId: r.id,
         marketId: mids[0] ?? "",
-        arrivalDay: arrivalDay(r.get("arrival_date")),
-        arrivalRaw: r.get("arrival_date"),
-        modal: num(r.get("modal_price")) ?? num(r.get("price_per_kg")),
-        minPrice: num(r.get("min_price")),
-        maxPrice: num(r.get("max_price")),
+        arrivalDay: arrivalDay(r.get("price_date") ?? r.get("arrival_date")),
+        arrivalRaw: r.get("price_date") ?? r.get("arrival_date"),
+        modal: num(r.get("price_modal")) ?? num(r.get("modal_price")) ?? num(r.get("price_per_kg")),
+        minPrice: num(r.get("price_min")) ?? num(r.get("min_price")),
+        maxPrice: num(r.get("price_max")) ?? num(r.get("max_price")),
         sourceRaw: src,
         sourceLabel: formatSourceLabel(src),
         createdTime: rawCreatedTime(r),
@@ -305,10 +305,10 @@ export async function GET(
       marketId: string,
       evalDay: string | null
     ): PricingFull | null {
-      const rows = pricingFull.filter((p) => p.marketId === marketId && p.arrivalDay);
+      const rows = pricingFull.filter((p) => p.marketId === marketId);
       const pool =
         evalDay != null
-          ? rows.filter((p) => (p.arrivalDay as string) <= evalDay)
+          ? rows.filter((p) => p.arrivalDay && (p.arrivalDay as string) <= evalDay)
           : rows;
       if (pool.length === 0) return null;
       return [...pool].sort((a, b) => {

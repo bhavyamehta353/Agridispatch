@@ -118,8 +118,8 @@ function qualityArrival(qPacked: number, T: number, H: number, month: string, kM
 
 function decayBucket(score: number | null): "Low" | "Medium" | "High" {
   if (score == null) return "Medium";
-  if (score < 0.34) return "Low";
-  if (score < 0.67) return "Medium";
+  if (score < 0.025) return "Low";
+  if (score < 0.05) return "Medium";
   return "High";
 }
 
@@ -167,13 +167,25 @@ export async function GET(
       trafficRecords,
       riskRecords,
     ] = await Promise.all([
-      base("Handling_Quality").select().all(),
-      base("Market_Evaluation").select().all(),
+      base("Handling_Quality").select({
+        filterByFormula: `{batch_id} = "${bidText}"`,
+        maxRecords: 5,
+      }).all(),
+      base("Market_Evaluation").select({
+        filterByFormula: `{batch_id} = "${bidText}"`,
+        maxRecords: 10,
+      }).all(),
       base("Markets").select().all(),
-      base("Market_Pricing").select().all(),
+      base("Market_Pricing").select({ maxRecords: 200 }).all(),
       base("Route_Reference").select().all(),
-      base("Traffic_Estimates").select().all(),
-      base("Environmental_Risk").select().all(),
+      base("Traffic_Estimates").select({
+        filterByFormula: `{batch_id} = "${bidText}"`,
+        maxRecords: 10,
+      }).all(),
+      base("Environmental_Risk").select({
+        filterByFormula: `{batch_id} = "${bidText}"`,
+        maxRecords: 10,
+      }).all(),
     ]);
 
     const handling = (handlingRecords as unknown as Rec[]).find((h) =>
@@ -212,17 +224,27 @@ export async function GET(
       return {
         recordId: r.id,
         marketId: mids[0] ?? "",
-        arrivalDay: arrivalDay(r.get("arrival_date")),
+        arrivalDay: arrivalDay(r.get("arrival_date") ?? r.get("price_date")),
         arrivalRaw: r.get("arrival_date"),
-        modal: num(r.get("modal_price")) ?? num(r.get("price_per_kg")),
-        min: num(r.get("min_price")) ?? num(r.get("min_price_per_kg")),
-        max: num(r.get("max_price")) ?? num(r.get("max_price_per_kg")),
+        modal: num(r.get("price_modal")) ?? num(r.get("modal_price")) ?? num(r.get("price_per_kg")),
+        min: num(r.get("price_min")) ?? num(r.get("min_price")) ?? num(r.get("min_price_per_kg")),
+        max: num(r.get("price_max")) ?? num(r.get("max_price")) ?? num(r.get("max_price_per_kg")),
         createdTime: rawCreatedTime(r),
       };
     });
 
+    const harvestDay = harvestTime != null
+      ? calendarDayInTimeZone(new Date(String(harvestTime)), PRICING_TIMEZONE)
+      : null;
+    const todayDay = calendarDayInTimeZone(new Date(), PRICING_TIMEZONE);
+    // Reference day for staleness: harvest date if known, otherwise today
+    const refDay = harvestDay ?? todayDay;
+
+    // harvestPriceByMarket: pricing record whose date matches the harvest day (ideal)
+    const harvestPriceByMarket = new Map<string, (typeof pricingParsed)[number]>();
+    // latestPriceByMarket: most recent dated record (fallback when no harvest-day match)
     const latestPriceByMarket = new Map<string, (typeof pricingParsed)[number]>();
-    // anyPriceByMarket: fallback for records without arrival_date (treated as stale)
+    // anyPriceByMarket: fallback for records without a date
     const anyPriceByMarket = new Map<string, (typeof pricingParsed)[number]>();
 
     const sortedP = [...pricingParsed]
@@ -233,6 +255,8 @@ export async function GET(
         return (b.createdTime ?? "").localeCompare(a.createdTime ?? "");
       });
     for (const row of sortedP) {
+      if (harvestDay && row.arrivalDay === harvestDay && !harvestPriceByMarket.has(row.marketId))
+        harvestPriceByMarket.set(row.marketId, row);
       if (!latestPriceByMarket.has(row.marketId))
         latestPriceByMarket.set(row.marketId, row);
     }
@@ -245,8 +269,6 @@ export async function GET(
       if (!anyPriceByMarket.has(row.marketId))
         anyPriceByMarket.set(row.marketId, row);
     }
-
-    const todayDay = calendarDayInTimeZone(new Date(), PRICING_TIMEZONE);
 
     function findRoute(marketId: string): Rec | undefined {
       const routes = routeRecords as unknown as Rec[];
@@ -297,18 +319,21 @@ export async function GET(
       const tau = num(traffic?.get("tau")) ?? 0;
       const tActualHr = tActualHours(tBaseHr, tau);
       const effTravel = effectiveTravelHours(tBaseHr, tau);
-      const logi = logisticsCost(distanceKm, tBaseHr, tau);
+      const storedLogi = num(getField(ev as Rec, "logistics_cost"));
+      const logi = storedLogi ?? logisticsCost(distanceKm, tBaseHr, tau);
 
-      const priceRow = latestPriceByMarket.get(m.id) ?? anyPriceByMarket.get(m.id) ?? null;
+      // Prefer harvest-day price → latest dated → any undated
+      const priceRow = harvestPriceByMarket.get(m.id) ?? latestPriceByMarket.get(m.id) ?? anyPriceByMarket.get(m.id) ?? null;
       // Fall back to prices stored in evaluation record when no pricing row exists at all
-      const evalModal = num(getField(ev as Rec, "modal_price", "price_per_kg", "modal_price_per_kg"));
-      const evalMin   = num(getField(ev as Rec, "min_price", "min_price_per_kg"));
-      const evalMax   = num(getField(ev as Rec, "max_price", "max_price_per_kg"));
+      const evalModal = num(getField(ev as Rec, "price_modal", "modal_price", "price_per_kg", "modal_price_per_kg"));
+      const evalMin   = num(getField(ev as Rec, "price_min", "min_price", "min_price_per_kg"));
+      const evalMax   = num(getField(ev as Rec, "price_max", "max_price", "max_price_per_kg"));
       const modal    = priceRow?.modal ?? evalModal ?? null;
       const minPrice = priceRow?.min   ?? evalMin   ?? null;
       const maxPrice = priceRow?.max   ?? evalMax   ?? null;
+      // Prices are stale if they don't match the harvest day (or today if harvest unknown)
       const priceStale = priceRow?.arrivalDay != null
-        ? priceRow.arrivalDay < todayDay
+        ? priceRow.arrivalDay !== refDay
         : modal != null; // undated or eval-sourced price is always stale
 
       const gross =
@@ -338,7 +363,12 @@ export async function GET(
         qualityPacked != null && temperatureC != null && humidityPct != null
           ? qualityArrival(qualityPacked, temperatureC, humidityPct, harvestMonth, kMultiplier, maturityGrade, tActualHr)
           : null;
-      const feasible = qArr != null ? qArr >= Q_MIN : qualityPacked != null && qualityPacked >= Q_MIN;
+      // Prefer the feasibility the evaluation agent computed and stored in Airtable.
+      // Fall back to live recomputation only when no eval record exists yet.
+      const evalFeasible = ev != null ? ev.get("quality_feasible") : undefined;
+      const feasible = evalFeasible != null
+        ? Boolean(evalFeasible)
+        : qArr != null ? qArr >= Q_MIN : qualityPacked != null && qualityPacked >= Q_MIN;
 
       const decayRaw = num(
         getField(risk as Rec, "decay_risk_score", "decay_risk", "k_eff")
@@ -399,38 +429,32 @@ export async function GET(
       name: string;
     }[];
 
-    const sortedByProfit = [...profits].sort((a, b) => b.profit - a.profit);
-    const topProfit = sortedByProfit[0];
-    const secondProfitRow = sortedByProfit[1];
-    const secondProfitVal = secondProfitRow?.profit ?? null;
-    const margin =
-      topProfit && secondProfitVal != null
-        ? topProfit.profit - secondProfitVal
-        : null;
-
     let winnerMarketId: string | null = null;
-    let winnerNameFromEval: string | null = null;
 
-    const recMarketHint = evalRows
-      .map((e) => String(getField(e, "recommended_market") ?? "").trim())
-      .find(Boolean);
-    if (recMarketHint) {
-      const match = markets.find(
-        (m) =>
-          m.name === recMarketHint ||
-          m.name.toLowerCase() === recMarketHint.toLowerCase()
-      );
-      if (match) winnerMarketId = match.id;
-      winnerNameFromEval = recMarketHint;
+    // Use the `recommended` checkbox the evaluation agent set on the winning row.
+    const recommendedRow = evalRows.find((e) => Boolean(e.get("recommended")));
+    if (recommendedRow) {
+      winnerMarketId = linkedIds(recommendedRow.get("market_id"))[0] ?? null;
     }
 
-    if (!winnerMarketId && topProfit) {
-      winnerMarketId = topProfit.id;
+    // Fallback for batches not yet evaluated: highest profit among feasible markets.
+    if (!winnerMarketId) {
+      const feasibleProfits = profits.filter((p) => p.feasible);
+      winnerMarketId = [...feasibleProfits].sort((a, b) => b.profit - a.profit)[0]?.id ?? null;
     }
 
     const winnerCol = marketColumns.find((c) => c.marketId === winnerMarketId);
-    const winnerName =
-      winnerNameFromEval ?? winnerCol?.marketName ?? "—";
+    const winnerName = winnerCol?.marketName ?? "—";
+
+    const feasibleSorted = profits
+      .filter((p) => p.feasible)
+      .sort((a, b) => b.profit - a.profit);
+    const secondFeasibleRow = feasibleSorted.find((p) => p.id !== winnerMarketId) ?? null;
+    const secondProfitVal = secondFeasibleRow?.profit ?? null;
+    const margin =
+      winnerCol?.expectedProfit != null && secondProfitVal != null
+        ? winnerCol.expectedProfit - secondProfitVal
+        : null;
 
     const feasibleAny = marketColumns.some((c) => c.feasible);
     const allInfeasible =
@@ -468,7 +492,7 @@ export async function GET(
         ? pricingDateForHeader.reduce((a, b) => (a < b ? a : b))
         : null;
     const headerPricingStale =
-      headerPricingDay != null && headerPricingDay < todayDay;
+      headerPricingDay != null && headerPricingDay !== refDay;
 
     const formulaResult =
       qualityInitial != null
@@ -511,7 +535,7 @@ export async function GET(
         expectedProfitWinner: winnerCol?.expectedProfit ?? null,
         marginOverNext: margin,
         closeCall:
-          margin != null && margin < 500 && secondProfitRow != null,
+          margin != null && margin < 500 && secondFeasibleRow != null,
       },
       winnerCard: {
         marketName: winnerName,
@@ -521,7 +545,7 @@ export async function GET(
         effectiveTravelHr: winnerEffTravel,
         marginOverNext: margin,
         closeCall:
-          margin != null && margin < 500 && secondProfitRow != null,
+          margin != null && margin < 500 && secondFeasibleRow != null,
         feasible:
           qualityPacked != null && qualityPacked >= Q_MIN,
       },
