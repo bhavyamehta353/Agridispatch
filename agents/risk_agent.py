@@ -201,7 +201,7 @@ def stub_weather(month: str, lat: float) -> dict:
 # Auto-increment risk_id
 # ---------------------------------------------------------------------------
 def next_risk_id_base(at: AirtableClient) -> int:
-    all_recs = at.list_records("Environmental_Risk", max_records=500)
+    all_recs = at.list_records(T_RISK, max_records=500)
     max_n = 0
     for rec in all_recs:
         rid = rec["fields"].get("risk_id", "RSK000")
