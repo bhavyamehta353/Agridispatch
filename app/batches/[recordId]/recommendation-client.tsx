@@ -570,11 +570,6 @@ export function RecommendationClient({
             </div>
           ) : null}
 
-          {data.edge.dispatched ? (
-            <div className="rounded-xl border border-emerald-800/40 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-400">
-              Dispatch recommended to <strong>{wc.marketName}</strong>. Decision has been recorded.
-            </div>
-          ) : null}
 
           <section className="rounded-2xl border-2 border-emerald-700/60 bg-gradient-to-br from-emerald-950/60 to-zinc-900 p-6">
             <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
