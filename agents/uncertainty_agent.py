@@ -227,8 +227,8 @@ def main():
             # Simulate price with independent draw
             price_ratio     = market_draws[market_id]["price"][i]
             price_modal_sim = md["price_modal"] * price_ratio
-            price_min_sim   = md["price_min"]   * price_ratio if md["price_min"] else None
-            price_max_sim   = md["price_max"]   * price_ratio if md["price_max"] else None
+            price_min_sim   = md["price_min"]   * price_ratio if md["price_min"]   is not None else None
+            price_max_sim   = md["price_max"]   * price_ratio if md["price_max"]   is not None else None
 
             # Recompute t_actual from tau_sim
             t_actual_sim = md["t_base_hr"] * (1 + tau_sim)
