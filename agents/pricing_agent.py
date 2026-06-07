@@ -64,7 +64,7 @@ def fetch_live_price(market_id: str) -> dict | None:
     }
 
     try:
-        r = requests.get(url, params=params, timeout=15)
+        r = requests.get(url, params=params, timeout=30)
         r.raise_for_status()
         records = r.json().get("records", [])
     except requests.exceptions.Timeout:
@@ -92,7 +92,7 @@ def fetch_live_price(market_id: str) -> dict | None:
             "limit": 10,   # fetch a few to find the most recent by date
         }
         try:
-            r = requests.get(url, params=params_recent, timeout=15)
+            r = requests.get(url, params=params_recent, timeout=30)
             r.raise_for_status()
             recent_records = r.json().get("records", [])
         except requests.exceptions.RequestException as e:
@@ -162,6 +162,16 @@ def main():
     markets = at.list_records(T_MARKETS, max_records=500)
     timestamp = args.price_timestamp or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    # Determine next pricing_id by finding the highest existing PRCxxx number
+    all_pricing = at.list_records(T_PRICING, max_records=1000)
+    max_prc = 0
+    for row in all_pricing:
+        pid = row.get("fields", {}).get("pricing_id", "")
+        m = __import__("re").match(r"^PRC(\d+)$", str(pid))
+        if m:
+            max_prc = max(max_prc, int(m.group(1)))
+    next_prc = max_prc + 1
+
     created = 0
     updated = 0
     skipped = 0
@@ -176,60 +186,68 @@ def main():
         # --- Step 1: Try live API (today first, then most recent fallback) ---
         price_data = fetch_live_price(market_id_text)
 
-        # --- Step 2: If API returned nothing, use existing Airtable values ---
+        # --- Step 2: If API returned nothing, carry forward stored Airtable values ---
         if price_data is None:
             match = f'{{market_key}}="{q(market_id_text)}"'
-            existing = at.get_one(T_PRICING, match)
+            all_existing = at.list_records(T_PRICING, filter_by_formula=match, max_records=100)
+            # Pick the most recent record that has a price_date
+            with_date = [r for r in all_existing if r.get("fields", {}).get("price_date")]
+            best = with_date[0] if with_date else (all_existing[0] if all_existing else None)
 
-            if existing:
-                ef = existing["fields"]
-                # Safely check for the new field first, then the legacy field
-                stored_price = ef.get("price_modal", ef.get("price_per_kg"))
-                
-                if stored_price:
-                    print(f"  [pricing] Using stored Airtable price: ₹{stored_price}/kg")
-                    skipped += 1
-                    continue   # keep existing record — nothing to overwrite
+            if best:
+                ef = best["fields"]
+                stored_modal = ef.get("price_modal", ef.get("price_per_kg"))
+                stored_min   = ef.get("price_min")
+                stored_max   = ef.get("price_max")
+
+                if stored_modal:
+                    print(f"  [pricing] API unavailable — carrying forward stored price: ₹{stored_modal}/kg")
+                    price_data = {
+                        "price_min":   stored_min,
+                        "price_max":   stored_max,
+                        "price_modal": stored_modal,
+                        "price_date":  ef.get("price_date"),
+                        "_date_already_formatted": True,
+                    }
 
             # --- Step 3: No API, no stored value — use stub if allowed ---
-            if args.stub_mode:
-                random.seed(hash(market_id_text) & 0xffffffff)
-                modal = round(random.uniform(18, 32), 1)
-                price_data = {
-                    "price_min": round(modal * 0.7, 2),
-                    "price_max": round(modal * 1.3, 2),
-                    "price_modal":     modal,
-                    "price_date":       None,
-                }
-                print(f"  [pricing] No live or stored price — stub: ₹{modal}/kg")
-            else:
-                print(f"  [pricing] No data available and stub_mode off — skipping {market_id_text}")
-                skipped += 1
-                continue
+            if price_data is None:
+                if args.stub_mode:
+                    random.seed(hash(market_id_text) & 0xffffffff)
+                    modal = round(random.uniform(18, 32), 1)
+                    price_data = {
+                        "price_min": round(modal * 0.7, 2),
+                        "price_max": round(modal * 1.3, 2),
+                        "price_modal":     modal,
+                        "price_date":       None,
+                    }
+                    print(f"  [pricing] No live or stored price — stub: ₹{modal}/kg")
+                else:
+                    print(f"  [pricing] No data available and stub_mode off — skipping {market_id_text}")
+                    skipped += 1
+                    continue
 
-        # --- Step 4: Write all 3 price fields to Airtable ---
-        match = f'{{market_key}}="{q(market_id_text)}"'
-        existing = at.get_one(T_PRICING, match)
+        # --- Step 4: Append a new pricing record (never overwrite — history is immutable) ---
+        pricing_id = f"PRC{str(next_prc).zfill(3)}"
+        next_prc += 1
 
         fields = {
-            "market_key":       market_id_text,
-            "market_id":        [market_rec_id],              # LINKED RECORD
-            "price_min": price_data["price_min"],
-            "price_max": price_data["price_max"],
-            "price_modal":     price_data["price_modal"],
-            "price_date":     price_data.get("price_date"),
+            "pricing_id":  pricing_id,
+            "market_key":  market_id_text,
+            "market_id":   [market_rec_id],
+            "price_min":   price_data["price_min"],
+            "price_max":   price_data["price_max"],
+            "price_modal": price_data["price_modal"],
         }
 
-        # Only write price_date if we have one (stubs won't have it)
         if price_data.get("price_date"):
-            fields["price_date"] = format_date_for_airtable(price_data["price_date"])
+            if price_data.get("_date_already_formatted"):
+                fields["price_date"] = price_data["price_date"]
+            else:
+                fields["price_date"] = format_date_for_airtable(price_data["price_date"])
 
-        at.upsert_by_formula(T_PRICING, match, fields)
-
-        if existing:
-            updated += 1
-        else:
-            created += 1
+        at.create_record(T_PRICING, fields)
+        created += 1
 
     print(json.dumps({
         "status":    "ok",
