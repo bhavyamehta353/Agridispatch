@@ -1,31 +1,5 @@
-import base from "../../lib/airtable";
 import { originByName } from "../../lib/origins";
-import Airtable from "airtable";
-import type { FieldSet } from "airtable/lib/field_set";
 import { NextResponse } from "next/server";
-
-/**
- * Optional: API name of a *linked record* field on Handling_Quality → Farmer_Batches.
- * `batch_id` on Handling_Quality is the farmer’s code (same value as on Farmer_Batches), not `rec…` ids.
- * Set this only if your base has a separate link column (e.g. "Farmer_Batches").
- */
-function handlingBatchLinkField(): string {
-  return process.env.AIRTABLE_HANDLING_BATCH_LINK_FIELD?.trim() ?? "";
-}
-
-function airtableErrorMessage(err: unknown): string {
-  if (err instanceof Airtable.Error) {
-    return err.message || err.error || "Airtable error.";
-  }
-  if (err instanceof Error && err.message) {
-    return err.message;
-  }
-  if (err && typeof err === "object" && "message" in err) {
-    const m = (err as { message: unknown }).message;
-    if (typeof m === "string" && m.length > 0) return m;
-  }
-  return "Airtable request failed.";
-}
 
 const MATURITY = new Set([
   "Breaker",
@@ -43,7 +17,6 @@ const PACKAGING = new Set([
 const FILL = new Set(["Low", "Medium", "High"]);
 
 type Body = {
-  batch_id?: string | number;
   origin_name?: string;
   harvest_time?: string;
   weight_harvest_kg?: unknown;
@@ -55,7 +28,6 @@ type Body = {
 
 function parseBody(json: Body) {
   const {
-    batch_id,
     origin_name,
     harvest_time,
     weight_harvest_kg,
@@ -64,19 +36,6 @@ function parseBody(json: Body) {
     packaging_type,
     fill_level,
   } = json;
-
-  const batchIdStr =
-    typeof batch_id === "number" && Number.isFinite(batch_id)
-      ? String(batch_id)
-      : typeof batch_id === "string"
-        ? batch_id.trim()
-        : "";
-  if (!batchIdStr) {
-    return { error: "batch_id is required." };
-  }
-  if (batchIdStr.length > 120) {
-    return { error: "batch_id is too long (max 120 characters)." };
-  }
 
   if (!origin_name || typeof origin_name !== "string") {
     return { error: "origin_name is required." };
@@ -102,40 +61,26 @@ function parseBody(json: Body) {
   }
 
   if (!maturity_grade || !MATURITY.has(maturity_grade)) {
-    return {
-      error: "maturity_grade is not a valid option.",
-    };
+    return { error: "maturity_grade is not a valid option." };
   }
 
   if (!harvest_method || !HARVEST_METHOD.has(harvest_method)) {
-    return {
-      error: "harvest_method must be Mixed, Selective, or Hand-picked.",
-    };
+    return { error: "harvest_method must be Mixed, Selective, or Hand-picked." };
   }
 
   if (!packaging_type || !PACKAGING.has(packaging_type)) {
     return {
-      error:
-        "packaging_type must be Wooden Crate, Plastic Crate, or Gunny Bag.",
+      error: "packaging_type must be Wooden Crate, Plastic Crate, or Gunny Bag.",
     };
   }
 
   if (!fill_level || !FILL.has(fill_level)) {
-    return {
-      error: "fill_level must be Low, Medium, or High.",
-    };
+    return { error: "fill_level must be Low, Medium, or High." };
   }
-
-  const batchIdField: string | number =
-    /^\d+$/.test(batchIdStr) ? parseInt(batchIdStr, 10) : batchIdStr;
 
   return {
     ok: true as const,
-    batch_id: batchIdField,
     origin_id: origin.origin_id,
-    origin_name: origin.origin_name,
-    origin_lat: origin.origin_lat,
-    origin_lng: origin.origin_lng,
     harvest_time: harvestDate.toISOString(),
     weight_harvest_kg: weight,
     maturity_grade,
@@ -146,9 +91,9 @@ function parseBody(json: Body) {
 }
 
 export async function POST(request: Request) {
-  if (!process.env.AIRTABLE_API_KEY || !process.env.AIRTABLE_BASE_ID) {
+  if (!process.env.N8N_FARMER_INTAKE_WEBHOOK_URL) {
     return NextResponse.json(
-      { error: "Server is missing Airtable configuration." },
+      { error: "Server is missing n8n webhook configuration." },
       { status: 500 }
     );
   }
@@ -165,84 +110,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
 
-  let airtableRecordId: string | undefined;
-
   try {
-    const batchRecords = await base("Farmer_Batches").create(
-      [
-        {
-          fields: {
-            batch_id: parsed.batch_id,
-            farm_origin_id: parsed.origin_id,
-            origin_id: parsed.origin_id,
-            origin_name: parsed.origin_name,
-            origin_lat: parsed.origin_lat,
-            origin_lng: parsed.origin_lng,
-            harvest_time: parsed.harvest_time,
-            weight_harvest_kg: parsed.weight_harvest_kg,
-            weight_kg: parsed.weight_harvest_kg,
-            maturity_grade: parsed.maturity_grade,
-            harvest_method: parsed.harvest_method,
-            status: "Submitted",
-          },
-        },
-      ],
-      { typecast: true }
-    );
-
-    const batchRecord = batchRecords[0];
-    airtableRecordId = batchRecord?.id;
-    if (!airtableRecordId) {
-      return NextResponse.json(
-        {
-          error:
-            "Airtable created a batch but did not return a record id. Check your API version and table name.",
-        },
-        { status: 502 }
-      );
-    }
-
-    const handlingFields: FieldSet = {
-      batch_id: parsed.batch_id,
-      packaging_type: parsed.packaging_type,
-      fill_level: parsed.fill_level,
-    };
-
-    const linkField = handlingBatchLinkField();
-    if (linkField.length > 0) {
-      handlingFields[linkField] = [airtableRecordId];
-    }
-
-    const handlingRecords = await base("Handling_Quality").create(
-      [{ fields: handlingFields }],
-      { typecast: true }
-    );
-
-    const handlingRecord = handlingRecords[0];
-    const handlingRecordId = handlingRecord?.id;
-    if (!handlingRecordId) {
-      return NextResponse.json(
-        {
-          error:
-            "Handling row was not created correctly (missing record id). Your batch row may still exist in Airtable.",
-          batchRecordId: airtableRecordId,
-        },
-        { status: 502 }
-      );
-    }
-
-    return NextResponse.json({
-      batchRecordId: airtableRecordId,
-      handlingRecordId,
+    const n8nRes = await fetch(process.env.N8N_FARMER_INTAKE_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        origin_id: parsed.origin_id,
+        weight_harvest_kg: parsed.weight_harvest_kg,
+        maturity_grade: parsed.maturity_grade,
+        harvest_method: parsed.harvest_method,
+        packaging_type: parsed.packaging_type,
+        fill_level: parsed.fill_level,
+        harvest_time: parsed.harvest_time,
+      }),
     });
-  } catch (err: unknown) {
-    const message = airtableErrorMessage(err);
-    const body: Record<string, unknown> = { error: message };
-    if (airtableRecordId) {
-      body.batchRecordId = airtableRecordId;
-      body.hint =
-        "Farmer_Batches may already have this row. If you use a linked-record column to Farmer_Batches, set AIRTABLE_HANDLING_BATCH_LINK_FIELD to that field’s API name (not batch_id).";
+
+    if (!n8nRes.ok) {
+      const errText = await n8nRes.text();
+      return NextResponse.json(
+        { error: `n8n error: ${errText}` },
+        { status: 502 }
+      );
     }
-    return NextResponse.json(body, { status: 502 });
+
+    const n8nData = (await n8nRes.json()) as Record<string, unknown>;
+    return NextResponse.json(n8nData);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "n8n request failed.";
+    return NextResponse.json({ error: message }, { status: 502 });
   }
 }

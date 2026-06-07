@@ -65,24 +65,6 @@ function IconBox() {
   );
 }
 
-function IconTag() {
-  return (
-    <svg
-      className="h-6 w-6 shrink-0 text-farmer-green-light"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={1.75}
-      aria-hidden
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
-      />
-    </svg>
-  );
-}
 
 function IconMapPin() {
   return (
@@ -109,7 +91,6 @@ function IconMapPin() {
 }
 
 export default function FarmerPage() {
-  const [batchId, setBatchId] = useState("");
   const [originName, setOriginName] = useState<string>(ORIGINS[0].origin_name);
   const [harvestTime, setHarvestTime] = useState("");
   const [weightKg, setWeightKg] = useState("");
@@ -133,12 +114,8 @@ export default function FarmerPage() {
     setMessage("");
 
     const weight = parseInt(weightKg, 10);
-    const trimmedBatchId = batchId.trim();
-    const batchPayload =
-      /^\d+$/.test(trimmedBatchId) ? parseInt(trimmedBatchId, 10) : trimmedBatchId;
 
     const payload = {
-      batch_id: batchPayload,
       origin_name: originName,
       harvest_time: new Date(harvestTime).toISOString(),
       weight_harvest_kg: weight,
@@ -156,26 +133,20 @@ export default function FarmerPage() {
       });
       const data = (await res.json()) as {
         error?: string;
-        hint?: string;
-        batchRecordId?: string;
+        status?: string;
+        batch_id?: string;
       };
 
       if (!res.ok) {
         setStatus("err");
-        const parts = [
-          data.error ?? "Something went wrong.",
-          data.batchRecordId
-            ? `Batch record id: ${data.batchRecordId}`
-            : null,
-          data.hint ?? null,
-        ].filter(Boolean);
-        setMessage(parts.join(" "));
+        setMessage(data.error ?? "Something went wrong.");
         return;
       }
 
       setStatus("ok");
-      setMessage("Saved to Airtable. You can submit another batch.");
-      setBatchId("");
+      setMessage(
+        `Batch ${data.batch_id ?? "submitted"} — pipeline is now running.`
+      );
       setOriginName(ORIGINS[0].origin_name);
       setHarvestTime("");
       setWeightKg("");
@@ -237,30 +208,6 @@ export default function FarmerPage() {
             </div>
 
             <div className="mt-6 space-y-5">
-              <div>
-                <label
-                  htmlFor="batch_id"
-                  className="flex items-center gap-2 text-sm font-medium text-farmer-earth"
-                >
-                  <IconTag />
-                  Batch ID
-                </label>
-                <input
-                  id="batch_id"
-                  name="batch_id"
-                  type="text"
-                  required
-                  autoComplete="off"
-                  placeholder="e.g. B-2026-0142 or your farm code"
-                  value={batchId}
-                  onChange={(e) => setBatchId(e.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-farmer-earth-light bg-farmer-cream/50 px-3 py-3 text-farmer-muted outline-none ring-farmer-green-light focus:ring-2"
-                  style={{
-                    fontFamily: "var(--font-farmer-mono), ui-monospace, monospace",
-                  }}
-                />
-              </div>
-
               <div>
                 <label
                   htmlFor="origin_name"
@@ -520,14 +467,14 @@ export default function FarmerPage() {
             className="w-full rounded-2xl bg-linear-to-r from-farmer-accent to-farmer-accent-light py-4 text-base font-bold text-white shadow-lg transition-opacity hover:opacity-95 disabled:opacity-60"
             style={{ fontFamily: "var(--font-farmer-heading), sans-serif" }}
           >
-            {status === "loading" ? "Saving…" : "Submit to Airtable"}
+            {status === "loading" ? "Submitting…" : "Submit batch"}
           </button>
         </form>
       </main>
 
       <footer className="border-t border-farmer-earth-light bg-white/80 py-6 text-center text-xs text-farmer-earth">
-        Your Batch ID is stored on the batch row; handling is linked to that
-        record in Airtable.
+        Your submission is routed through n8n, which writes to Airtable and
+        runs the full dispatch pipeline.
       </footer>
     </div>
   );

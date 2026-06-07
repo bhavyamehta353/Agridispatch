@@ -83,8 +83,6 @@ export default function MarketPricingPage() {
   const [historyTo, setHistoryTo] = useState("");
   const [historyDays, setHistoryDays] = useState(7);
   const [toast, setToast] = useState<string | null>(null);
-  const [fetchingId, setFetchingId] = useState<string | null>(null);
-  const [autoFilling, setAutoFilling] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editMarket, setEditMarket] = useState<MarketCard | null>(null);
@@ -196,73 +194,6 @@ export default function MarketPricingPage() {
     }
   }
 
-  async function fetchAgmarknet(marketAirtableId?: string) {
-    setFetchingId(marketAirtableId ?? "ALL");
-    try {
-      const res = await fetch("/api/market-pricing/agmarknet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: marketAirtableId ? JSON.stringify({ marketAirtableId }) : "{}",
-      });
-      const j = (await res.json()) as {
-        results?: { marketName: string; status: string; message?: string; modal?: number }[];
-        error?: string;
-      };
-      if (!res.ok) {
-        setToast(j.error ?? "Agmarknet fetch failed");
-        return;
-      }
-      const results = j.results ?? [];
-      const ok = results.filter((r) => r.status === "ok");
-      const failed = results.filter((r) => r.status !== "ok");
-      if (ok.length > 0) {
-        const names = ok.map((r) => `${r.marketName} ₹${r.modal}/kg`).join(", ");
-        setToast(`Updated: ${names}${failed.length > 0 ? ` · ${failed.length} failed` : ""}`);
-      } else {
-        const msg = failed.map((r) => r.message ?? r.status).join("; ");
-        setToast(`No data fetched. ${msg}`);
-      }
-      await load();
-    } catch {
-      setToast("Network error fetching Agmarknet prices");
-    } finally {
-      setFetchingId(null);
-    }
-  }
-
-  async function autoFillFromAgmarknet() {
-    if (!editMarket) return;
-    setAutoFilling(true);
-    setFormError(null);
-    try {
-      const res = await fetch(
-        `/api/market-pricing/agmarknet?marketAirtableId=${editMarket.id}`
-      );
-      const j = (await res.json()) as {
-        result?: {
-          min: number;
-          max: number;
-          modal: number;
-          arrivalDay: string;
-        } | null;
-        error?: string;
-      };
-      if (!j.result) {
-        setFormError(j.error ?? "No Agmarknet data available for this market");
-        return;
-      }
-      const r = j.result;
-      setFormArrival(r.arrivalDay);
-      setFormModal(String(r.modal));
-      setFormMin(String(r.min));
-      setFormMax(String(r.max));
-    } catch {
-      setFormError("Network error fetching Agmarknet data");
-    } finally {
-      setAutoFilling(false);
-    }
-  }
-
   const bannerBg =
     loading && !data
       ? "bg-zinc-600"
@@ -315,14 +246,6 @@ export default function MarketPricingPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => fetchAgmarknet()}
-              disabled={fetchingId !== null || loading}
-              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-sky-700 disabled:opacity-50"
-            >
-              {fetchingId === "ALL" ? "Fetching…" : "Fetch all from Agmarknet"}
-            </button>
             <button
               type="button"
               onClick={() => load()}
@@ -419,19 +342,11 @@ export default function MarketPricingPage() {
                   </div>
                 )}
 
-                <div className="mt-4 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => fetchAgmarknet(m.id)}
-                    disabled={fetchingId !== null}
-                    className="flex-1 rounded-xl bg-sky-600 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-                  >
-                    {fetchingId === m.id ? "Fetching…" : "Fetch Agmarknet"}
-                  </button>
+                <div className="mt-4">
                   <button
                     type="button"
                     onClick={() => openEdit(m)}
-                    className="flex-1 rounded-xl border border-zinc-300 bg-white py-2 text-sm font-medium hover:bg-zinc-50"
+                    className="w-full rounded-xl border border-zinc-300 bg-white py-2 text-sm font-medium hover:bg-zinc-50"
                   >
                     {hasData ? "Edit" : "Enter manually"}
                   </button>
@@ -574,20 +489,6 @@ export default function MarketPricingPage() {
             <p className="mt-1 text-sm text-zinc-600">
               Creates a new Market_Pricing record (history preserved).
             </p>
-
-            <div className="mt-4">
-              <button
-                type="button"
-                onClick={autoFillFromAgmarknet}
-                disabled={autoFilling}
-                className="w-full rounded-xl border border-sky-300 bg-sky-50 py-2.5 text-sm font-semibold text-sky-800 hover:bg-sky-100 disabled:opacity-50"
-              >
-                {autoFilling ? "Fetching from Agmarknet…" : "Auto-fill from Agmarknet"}
-              </button>
-              <p className="mt-1.5 text-center text-xs text-zinc-500">
-                Fetches latest Agmarknet data and populates the fields below for review.
-              </p>
-            </div>
 
             <form onSubmit={submitForm} className="mt-4 space-y-4">
               <label className="block text-sm">
