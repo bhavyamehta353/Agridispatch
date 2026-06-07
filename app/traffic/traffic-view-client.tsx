@@ -773,9 +773,6 @@ export function TrafficViewClient() {
                 <div className="mt-3">
                   <CombinedBadge health={drawerRoute.combinedHealth} />
                 </div>
-                <p className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm leading-relaxed text-zinc-400">
-                  {drawerInterpretation(drawerRoute.combinedHealth)}
-                </p>
               </div>
               <button
                 type="button"
