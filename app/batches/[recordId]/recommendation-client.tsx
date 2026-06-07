@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { FlaskConical, MapPinned, Truck } from "lucide-react";
+import { FlaskConical, TrendingUp, Truck } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { UserRole } from "../../lib/auth";
@@ -9,13 +9,35 @@ import type { UserRole } from "../../lib/auth";
 const RecommendedRouteMap = dynamic(() => import("./recommended-route-map"), {
   ssr: false,
   loading: () => (
-    <div className="flex h-[clamp(16rem,38vh,24rem)] w-full items-center justify-center rounded-2xl border border-zinc-200 bg-zinc-100 text-sm text-zinc-500 sm:h-[clamp(18rem,42vh,28rem)]">
+    <div className="flex h-[clamp(16rem,38vh,24rem)] w-full items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900 text-sm text-zinc-500 sm:h-[clamp(18rem,42vh,28rem)]">
       Loading route map...
     </div>
   ),
 });
 
 // ── Types ────────────────────────────────────────────────────────────────────
+
+type UncertaintyMarket = {
+  marketId: string;
+  marketName: string;
+  netProfitWorst: number;
+  netProfitLikely: number;
+  netProfitBest: number;
+  feasibilityProb: number;
+  recommendationStability: number;
+  nSimulations: number;
+  gated: boolean;
+};
+
+type UncertaintyPayload = {
+  hasData: boolean;
+  mcRecommendedMarketId: string | null;
+  feasibilityThreshold: number;
+  nSimulations: number;
+  markets: UncertaintyMarket[];
+  error?: string;
+};
+
 type MarketCol = {
   marketId: string;
   marketName: string;
@@ -206,9 +228,9 @@ function QualityDot({ tier }: { tier: string }) {
 
 function DecayBadge({ level }: { level: string }) {
   const cls =
-    level === "Low" ? "bg-emerald-100 text-emerald-900"
-    : level === "Medium" ? "bg-amber-100 text-amber-900"
-    : "bg-red-100 text-red-900";
+    level === "Low" ? "bg-emerald-900/40 text-emerald-400 ring-1 ring-emerald-700/40"
+    : level === "Medium" ? "bg-amber-900/40 text-amber-400 ring-1 ring-amber-700/40"
+    : "bg-red-900/40 text-red-400 ring-1 ring-red-700/40";
   return <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${cls}`}>{level}</span>;
 }
 
@@ -220,13 +242,13 @@ function QualityBar({ value, qMin }: { value: number; qMin: number }) {
     : "bg-red-500";
   return (
     <div className="flex items-center gap-2">
-      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-zinc-200">
+      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-zinc-700">
         <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
       </div>
       <span className={`font-mono text-xs tabular-nums ${
-        value >= 0.85 ? "text-emerald-700"
-        : value >= qMin ? "text-amber-700"
-        : "text-red-600"
+        value >= 0.85 ? "text-emerald-400"
+        : value >= qMin ? "text-amber-400"
+        : "text-red-400"
       }`}>
         {value.toFixed(3)}
       </span>
@@ -248,14 +270,18 @@ export function RecommendationClient({
   recordId: string;
   userRole: UserRole | null;
 }) {
-  void userRole; // available for future role-gating
 
   const [data, setData] = useState<RecPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [confirmDispatch, setConfirmDispatch] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [activeTab, setActiveTab] = useState<"recommendation" | "simulate">("recommendation");
+  const [dispatchErr, setDispatchErr] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"recommendation" | "simulate" | "forecast">("recommendation");
+  const [forecastData, setForecastData] = useState<UncertaintyPayload | null>(null);
+  const [forecastLoading, setForecastLoading] = useState(false);
+  const [forecastErr, setForecastErr] = useState<string | null>(null);
+  const forecastFetchedRef = useRef(false);
 
   // Simulator sliders
   const [tempC, setTempC] = useState(25);
@@ -270,6 +296,29 @@ export function RecommendationClient({
       if (data.routeWinner?.humidityPct    != null) setHumidity(data.routeWinner.humidityPct);
     }
   }, [data]);
+
+  useEffect(() => {
+    if (activeTab !== "forecast" || forecastFetchedRef.current) return;
+    forecastFetchedRef.current = true;
+    let cancelled = false;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    setForecastLoading(true);
+    setForecastErr(null);
+    fetch(`/api/batches/${recordId}/uncertainty`, { signal: controller.signal })
+      .then((r) => r.json())
+      .then((json: UncertaintyPayload) => {
+        if (!cancelled) setForecastData(json);
+      })
+      .catch(() => {
+        if (!cancelled) setForecastErr("Could not load forecast data. Try refreshing.");
+      })
+      .finally(() => {
+        clearTimeout(timeout);
+        if (!cancelled) setForecastLoading(false);
+      });
+    return () => { cancelled = true; controller.abort(); clearTimeout(timeout); };
+  }, [activeTab, recordId]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -314,7 +363,7 @@ export function RecommendationClient({
         body: JSON.stringify({ status: "Dispatched" }),
       });
       const j = (await res.json()) as { error?: string };
-      if (!res.ok) { alert(j.error ?? "Dispatch failed"); return; }
+      if (!res.ok) { setDispatchErr(j.error ?? "Dispatch failed"); return; }
       setConfirmDispatch(false);
       await load();
     } finally {
@@ -370,8 +419,8 @@ export function RecommendationClient({
   if (err || !data) {
     return (
       <div className="mx-auto max-w-lg px-4 py-16 text-center">
-        <p className="text-red-700">{err ?? "Unknown error"}</p>
-        <Link href="/batches" className="mt-4 inline-block text-sky-700 underline">
+        <p className="text-red-400">{err ?? "Unknown error"}</p>
+        <Link href="/batches" className="mt-4 inline-block text-emerald-400 underline">
           Back to overview
         </Link>
       </div>
@@ -387,16 +436,16 @@ export function RecommendationClient({
   if (!data.evaluation.hasEvaluation) {
     return (
       <div className="pb-28">
-        <div className="border-b border-zinc-200 bg-white px-4 py-4 shadow-sm sm:px-6">
-          <p className="text-xs uppercase text-zinc-500">Batch</p>
-          <p className="font-mono font-semibold text-zinc-900">{data.batch.batchId}</p>
+        <div className="border-b border-zinc-800 bg-zinc-900 px-4 py-4 sm:px-6">
+          <p className="text-xs uppercase tracking-widest text-zinc-500">Batch</p>
+          <p className="font-mono font-semibold text-zinc-100">{data.batch.batchId}</p>
         </div>
         <div className="mx-auto max-w-lg px-4 py-16 text-center">
-          <p className="text-lg font-semibold text-zinc-900">No evaluation yet for this batch.</p>
-          <p className="mt-2 text-sm text-zinc-600">
+          <p className="text-lg font-semibold text-zinc-200">No evaluation yet for this batch.</p>
+          <p className="mt-2 text-sm text-zinc-500">
             Run the evaluation pipeline to compare markets and see a recommended dispatch.
           </p>
-          <Link href="/batches" className="mt-4 block text-sm text-sky-700 underline">
+          <Link href="/batches" className="mt-4 block text-sm text-emerald-400 underline underline-offset-2">
             Back to overview
           </Link>
         </div>
@@ -429,65 +478,85 @@ export function RecommendationClient({
   return (
     <div className="pb-32">
       {/* ── Sticky header ──────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur sm:px-6">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-          <div>
-            <span className="text-zinc-500">Batch</span>{" "}
-            <span className="font-mono font-semibold">{data.batch.batchId}</span>
-          </div>
-          <div>
-            <span className="text-zinc-500">Farm</span>{" "}
-            <span className="font-medium">{data.batch.farmName}</span>
-          </div>
-          <div>
-            <span className="text-zinc-500">Harvest</span>{" "}
-            {formatHarvest(data.batch.harvestTime)}
-          </div>
-          <div>
-            <span className="text-zinc-500">Weight</span>{" "}
-            <span className="font-mono">{data.batch.weightKg} kg</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-zinc-500">Quality</span>
-            <QualityDot tier={data.handling.qualityTier} />
-            <span className="font-mono tabular-nums">{q != null ? q.toFixed(2) : "—"}</span>
-          </div>
-          <div className="text-xs text-zinc-600">
-            Eval:{" "}
-            {data.evaluation.evaluationTime ? formatHarvest(data.evaluation.evaluationTime) : "—"}
-          </div>
-          <div className="flex items-center gap-1 text-xs text-zinc-600">
-            <span>Prices: {data.headerMeta.pricingActiveDay ?? "—"}</span>
-            {data.headerMeta.pricingStale ? (
-              <span className="text-amber-700" title="Not today's date in Asia/Kolkata">stale</span>
-            ) : null}
+      <header className="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-900/95 px-4 py-2.5 backdrop-blur sm:px-6">
+        <div className="mx-auto max-w-6xl space-y-1.5">
+          {/* Primary row — pill chips + tab toggle */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {/* Batch — highlighted */}
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-800/60 bg-emerald-950/50 px-2.5 py-1 text-xs">
+              <span className="text-emerald-600">Batch</span>
+              <span className="font-mono font-bold text-emerald-400">{data.batch.batchId}</span>
+            </span>
+            {/* Farm */}
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-700 bg-zinc-800 px-2.5 py-1 text-xs">
+              <span className="text-zinc-500">Farm</span>
+              <span className="font-medium text-zinc-200">{data.batch.farmName}</span>
+            </span>
+            {/* Harvest */}
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-700 bg-zinc-800 px-2.5 py-1 text-xs">
+              <span className="text-zinc-500">Harvest</span>
+              <span className="font-mono text-zinc-300">{formatHarvest(data.batch.harvestTime)}</span>
+            </span>
+            {/* Weight */}
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-700 bg-zinc-800 px-2.5 py-1 text-xs">
+              <span className="text-zinc-500">Weight</span>
+              <span className="font-mono text-zinc-300">{data.batch.weightKg} kg</span>
+            </span>
+            {/* Quality */}
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-700 bg-zinc-800 px-2.5 py-1 text-xs">
+              <span className="text-zinc-500">Quality</span>
+              <QualityDot tier={data.handling.qualityTier} />
+              <span className="font-mono tabular-nums text-zinc-300">{q != null ? q.toFixed(2) : "—"}</span>
+            </span>
+
+            {/* Tab toggle — right */}
+            <div className="ml-auto flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-800 p-0.5">
+              <button
+                type="button"
+                onClick={() => setActiveTab("recommendation")}
+                className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                  activeTab === "recommendation"
+                    ? "bg-zinc-700 text-zinc-100 shadow-sm"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                Recommendation
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("simulate")}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                  activeTab === "simulate"
+                    ? "bg-zinc-700 text-zinc-100 shadow-sm"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                <FlaskConical className="h-3 w-3" />
+                Simulate
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("forecast")}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                  activeTab === "forecast"
+                    ? "bg-zinc-700 text-zinc-100 shadow-sm"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                <TrendingUp className="h-3 w-3" />
+                Forecast
+              </button>
+            </div>
           </div>
 
-          {/* Tab toggle — top-right */}
-          <div className="ml-auto flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-0.5">
-            <button
-              type="button"
-              onClick={() => setActiveTab("recommendation")}
-              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                activeTab === "recommendation"
-                  ? "bg-white text-zinc-900 shadow-sm"
-                  : "text-zinc-500 hover:text-zinc-700"
-              }`}
-            >
-              Recommendation
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("simulate")}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                activeTab === "simulate"
-                  ? "bg-white text-zinc-900 shadow-sm"
-                  : "text-zinc-500 hover:text-zinc-700"
-              }`}
-            >
-              <FlaskConical className="h-3 w-3" />
-              Simulate
-            </button>
+          {/* Secondary row — eval + prices, muted */}
+          <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-600">
+            <span>
+              Eval:{" "}
+              <span className="text-zinc-500">
+                {data.evaluation.evaluationTime ? formatHarvest(data.evaluation.evaluationTime) : "—"}
+              </span>
+            </span>
           </div>
         </div>
       </header>
@@ -496,67 +565,67 @@ export function RecommendationClient({
       {activeTab === "recommendation" ? (
         <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6">
           {data.edge.allInfeasible ? (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+            <div className="rounded-xl border border-red-800/40 bg-red-950/30 px-4 py-3 text-sm text-red-400">
               No feasible market — quality below Q_MIN ({qMin}) for all routes.
             </div>
           ) : null}
 
           {data.edge.dispatched ? (
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-              Dispatched to <strong>{wc.marketName}</strong>. Status is read-only.
+            <div className="rounded-xl border border-emerald-800/40 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-400">
+              Dispatch recommended to <strong>{wc.marketName}</strong>. Decision has been recorded.
             </div>
           ) : null}
 
-          <section className="rounded-2xl border-2 border-emerald-600 bg-gradient-to-br from-emerald-50 to-white p-6 shadow-md">
-            <p className="text-xs font-bold uppercase tracking-wide text-emerald-800">
+          <section className="rounded-2xl border-2 border-emerald-700/60 bg-gradient-to-br from-emerald-950/60 to-zinc-900 p-6">
+            <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
               Recommended dispatch
             </p>
-            <h1 className="mt-1 text-3xl font-bold text-zinc-900">{wc.marketName}</h1>
-            <p className="mt-3 text-4xl font-bold text-emerald-800 tabular-nums">
+            <h1 className="mt-1 text-3xl font-bold text-zinc-100">{wc.marketName}</h1>
+            <p className="mt-3 text-4xl font-bold text-emerald-400 tabular-nums">
               {formatInr(wc.expectedProfit)}
             </p>
-            <p className="mt-1 text-sm text-zinc-600">Expected profit</p>
+            <p className="mt-1 text-sm text-zinc-500">Expected profit</p>
 
-            <div className="mt-4 flex flex-wrap gap-4 text-sm text-zinc-700">
+            <div className="mt-4 flex flex-wrap gap-4 text-sm">
               <div>
                 <span className="text-zinc-500">Modal price</span>{" "}
-                <span className="font-mono font-semibold">
+                <span className="font-mono font-semibold text-zinc-200">
                   {wc.modalPrice != null ? `₹${wc.modalPrice}/kg` : "—"}
                 </span>
               </div>
               <div>
                 <span className="text-zinc-500">Distance</span>{" "}
-                <span className="font-mono">
+                <span className="font-mono text-zinc-200">
                   {wc.distanceKm != null ? `${wc.distanceKm} km` : "—"}
                 </span>
               </div>
               <div>
                 <span className="text-zinc-500">Est. travel</span>{" "}
-                <span className="font-mono">
+                <span className="font-mono text-zinc-200">
                   {wc.effectiveTravelHr != null ? `${wc.effectiveTravelHr.toFixed(2)} hr` : "—"}
                 </span>
               </div>
             </div>
 
             {wc.marginOverNext != null && wc.marginOverNext > 0 ? (
-              <p className="mt-4 text-sm font-medium text-zinc-800">
+              <p className="mt-4 text-sm font-medium text-zinc-300">
                 {formatInr(wc.marginOverNext)} ahead of {secondName}
               </p>
             ) : null}
 
             {wc.closeCall ? (
-              <p className="mt-2 rounded-lg bg-amber-100 px-3 py-2 text-sm text-amber-900">
+              <p className="mt-2 rounded-lg border border-amber-700/40 bg-amber-950/30 px-3 py-2 text-sm text-amber-400">
                 Close call — verify current prices before dispatching.
               </p>
             ) : null}
 
             <div className="mt-4">
               {wc.feasible ? (
-                <span className="inline-flex rounded-full bg-emerald-600 px-3 py-1 text-xs font-bold text-white">
+                <span className="inline-flex rounded-full bg-emerald-700 px-3 py-1 text-xs font-bold text-white">
                   Feasible
                 </span>
               ) : (
-                <span className="inline-flex rounded-full bg-red-600 px-3 py-1 text-xs font-bold text-white">
+                <span className="inline-flex rounded-full bg-red-700 px-3 py-1 text-xs font-bold text-white">
                   Below threshold
                 </span>
               )}
@@ -564,27 +633,27 @@ export function RecommendationClient({
           </section>
 
           <section>
-            <h2 className="mb-3 text-lg font-bold text-zinc-900">Market comparison</h2>
-            <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white shadow-sm">
+            <h2 className="mb-3 text-lg font-bold text-zinc-100">Market comparison</h2>
+            <div className="overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900">
               <table className="w-full min-w-[720px] border-collapse text-sm">
                 <thead>
-                  <tr className="border-b border-zinc-200 bg-zinc-50">
+                  <tr className="border-b border-zinc-800 bg-zinc-800/50">
                     <th className="px-3 py-3 text-left text-xs font-semibold uppercase text-zinc-500">
                       Metric
                     </th>
                     {data.markets.map((m) => {
-                      const win  = m.marketId === winnerId;
+                      const win   = m.marketId === winnerId;
                       const muted = !m.feasible;
                       return (
                         <th
                           key={m.marketId}
                           className={`px-3 py-3 text-right ${
-                            win ? "bg-emerald-100/90 ring-2 ring-inset ring-emerald-500" : ""
-                          } ${muted ? "opacity-60" : ""}`}
+                            win ? "bg-emerald-950/60 ring-2 ring-inset ring-emerald-700/60" : ""
+                          } ${muted ? "opacity-50" : ""}`}
                         >
-                          <div className="font-semibold text-zinc-900">{m.marketName}</div>
-                          {win  ? <div className="mt-1 text-xs font-normal text-emerald-800">Recommended</div> : null}
-                          {muted ? <div className="mt-1 text-xs text-red-700">Not feasible</div> : null}
+                          <div className="font-semibold text-zinc-200">{m.marketName}</div>
+                          {win   ? <div className="mt-1 text-xs font-normal text-emerald-400">Recommended</div> : null}
+                          {muted ? <div className="mt-1 text-xs text-red-400">Not feasible</div> : null}
                         </th>
                       );
                     })}
@@ -598,7 +667,7 @@ export function RecommendationClient({
                         fn: (m: MarketCol) => (
                           <span
                             title={`₹18×${m.logisticsBreakdown.distanceKm} + ₹160×${m.logisticsBreakdown.tBaseHr}×(1+1.5×${m.logisticsBreakdown.tau}) + ₹500 = ₹${m.logisticsCost.toFixed(2)}`}
-                            className="cursor-help border-b border-dotted border-zinc-400"
+                            className="cursor-help border-b border-dotted border-zinc-600"
                           >
                             {formatInr(m.logisticsCost)}
                           </span>
@@ -606,24 +675,26 @@ export function RecommendationClient({
                       },
                       {
                         label: "Expected profit (₹)",
-                        fn: (m: MarketCol) => <strong>{formatInr(m.expectedProfit)}</strong>,
+                        fn: (m: MarketCol) => m.feasible
+                          ? <strong className="text-emerald-400">{formatInr(m.expectedProfit)}</strong>
+                          : <span className="text-zinc-600" title="Not shown — batch would not arrive at acceptable quality">—</span>,
                       },
                       { label: "Distance (km)",    fn: (m: MarketCol) => m.distanceKm },
                       { label: "Est. travel (hr)", fn: (m: MarketCol) => m.effectiveTravelHr.toFixed(2) },
-                      { label: "Decay risk",        fn: (m: MarketCol) => <DecayBadge level={m.decayRisk} /> },
+                      { label: "Decay risk",        fn: (m: MarketCol) => m.feasible ? <DecayBadge level={m.decayRisk} /> : <span className="text-zinc-600">—</span> },
                       { label: "Feasible",          fn: (m: MarketCol) => (m.feasible ? "Yes" : "No") },
                     ] as const
                   ).map((row) => (
-                    <tr key={row.label} className="border-b border-zinc-100 hover:bg-zinc-50/80">
-                      <td className="px-3 py-2 font-medium text-zinc-600">{row.label}</td>
+                    <tr key={row.label} className="border-b border-zinc-800 hover:bg-zinc-800/40">
+                      <td className="px-3 py-2 font-medium text-zinc-500">{row.label}</td>
                       {data.markets.map((m) => {
-                        const win  = m.marketId === winnerId;
+                        const win   = m.marketId === winnerId;
                         const muted = !m.feasible;
                         return (
                           <td
                             key={m.marketId}
-                            className={`px-3 py-2 text-right ${win ? "bg-emerald-50/50" : ""} ${
-                              muted ? "text-zinc-400" : "text-zinc-900"
+                            className={`px-3 py-2 text-right ${win ? "bg-emerald-950/30" : ""} ${
+                              muted ? "text-zinc-600" : "text-zinc-300"
                             }`}
                           >
                             {row.fn(m)}
@@ -640,21 +711,21 @@ export function RecommendationClient({
           {data.routeWinner ? (
             <div>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <h3 className="flex items-center gap-2 font-bold text-zinc-800">
-                  <Truck className="h-4.5 w-4.5 text-emerald-700" />
+                <h3 className="flex items-center gap-2 font-bold text-zinc-200">
+                  <Truck className="h-4 w-4 text-emerald-500" />
                   Route &amp; risk (winning market)
                 </h3>
                 <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 font-medium text-emerald-900 ring-1 ring-emerald-200">
-                    <span className="h-2.5 w-2.5 rounded-full border border-emerald-900/30 bg-emerald-500" />
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-950/40 px-2.5 py-1 font-medium text-emerald-400 ring-1 ring-emerald-700/40">
+                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
                     Farm
                   </span>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 font-medium text-blue-900 ring-1 ring-blue-200">
-                    <span className="h-2.5 w-2.5 rounded-full border border-blue-900/30 bg-blue-400" />
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-950/40 px-2.5 py-1 font-medium text-blue-400 ring-1 ring-blue-700/40">
+                    <span className="h-2.5 w-2.5 rounded-full bg-blue-400" />
                     Market
                   </span>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-zinc-50 px-2.5 py-1 font-medium text-zinc-700 ring-1 ring-zinc-200">
-                    <Truck className="h-3.5 w-3.5 text-emerald-700" />
+                  <span className="inline-flex items-center gap-1 rounded-full bg-zinc-800 px-2.5 py-1 font-medium text-zinc-400 ring-1 ring-zinc-700">
+                    <Truck className="h-3.5 w-3.5 text-emerald-500" />
                     Selected route
                   </span>
                 </div>
@@ -663,33 +734,25 @@ export function RecommendationClient({
                 {routeMapPoints ? (
                   <RecommendedRouteMap farm={routeMapPoints.farm} market={routeMapPoints.market} />
                 ) : (
-                  <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
+                  <div className="rounded-xl border border-dashed border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-zinc-500">
                     Route map unavailable — missing farm or market coordinates.
                   </div>
                 )}
-                <p className="text-xs text-zinc-500">
-                  <span className="inline-flex items-center gap-1">
-                    <MapPinned className="h-3.5 w-3.5" />
-                    Chosen path: {data.routeWinner.farmName} → {data.routeWinner.marketName}
-                  </span>
-                </p>
               </div>
               <dl className="mt-2 grid gap-2 sm:grid-cols-2">
                 {[
-                  ["Route",                `${data.routeWinner.farmName} → ${data.routeWinner.marketName}`],
-                  ["Distance",             `${data.routeWinner.distanceKm} km`],
-                  ["Base travel (hr)",     String(data.routeWinner.tBaseHr)],
-                  ["Delay τ",              String(data.routeWinner.tau)],
-                  ["Effective travel (hr)", data.routeWinner.effectiveTravelHr.toFixed(2)],
-                  ["Temperature (°C)",     data.routeWinner.temperatureC ?? "—"],
-                  ["Humidity (%)",         data.routeWinner.humidityPct ?? "—"],
+                  ["Route",            `${data.routeWinner.farmName} → ${data.routeWinner.marketName}`],
+                  ["Distance",         `${data.routeWinner.distanceKm} km`],
+                  ["Est. travel",      `${data.routeWinner.effectiveTravelHr.toFixed(1)} hr`],
+                  ["Temperature",      data.routeWinner.temperatureC != null ? `${data.routeWinner.temperatureC} °C` : "—"],
+                  ["Humidity",         data.routeWinner.humidityPct != null ? `${data.routeWinner.humidityPct}%` : "—"],
                 ].map(([label, val]) => (
-                  <div key={String(label)} className="flex justify-between gap-2 border-b border-zinc-100 py-1 text-sm">
+                  <div key={String(label)} className="flex justify-between gap-2 border-b border-zinc-800 py-1.5 text-sm">
                     <dt className="text-zinc-500">{label}</dt>
-                    <dd className="font-mono">{String(val)}</dd>
+                    <dd className="font-mono text-zinc-300">{String(val)}</dd>
                   </div>
                 ))}
-                <div className="flex justify-between gap-2 border-b border-zinc-100 py-1 text-sm">
+                <div className="flex justify-between gap-2 border-b border-zinc-800 py-1.5 text-sm">
                   <dt className="text-zinc-500">Decay risk</dt>
                   <dd><DecayBadge level={data.routeWinner.decayBucket} /></dd>
                 </div>
@@ -703,9 +766,9 @@ export function RecommendationClient({
       {activeTab === "simulate" ? (
         <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6">
           {/* Sliders */}
-          <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <h2 className="flex items-center gap-2 text-base font-bold text-zinc-900">
-              <FlaskConical className="h-4 w-4 text-violet-600" />
+          <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+            <h2 className="flex items-center gap-2 text-base font-bold text-zinc-100">
+              <FlaskConical className="h-4 w-4 text-violet-400" />
               Condition simulator
             </h2>
             <p className="mt-1 text-xs text-zinc-500">
@@ -714,56 +777,52 @@ export function RecommendationClient({
             </p>
 
             <div className="mt-5 grid gap-6 sm:grid-cols-2">
-              {/* Temperature */}
               <div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium text-zinc-700">Temperature</span>
-                  <span className="font-mono tabular-nums text-zinc-900">{tempC.toFixed(1)} °C</span>
+                  <span className="font-medium text-zinc-400">Temperature</span>
+                  <span className="font-mono tabular-nums text-zinc-200">{tempC.toFixed(1)} °C</span>
                 </div>
                 <input
                   type="range" min={5} max={50} step={0.5} value={tempC}
                   onChange={(e) => setTempC(parseFloat(e.target.value))}
-                  className="mt-2 w-full accent-violet-600"
+                  className="slider-temp mt-2 w-full"
                 />
-                <div className="mt-1 flex justify-between text-xs text-zinc-400">
+                <div className="mt-1 flex justify-between text-xs text-zinc-600">
                   <span>5 °C</span><span>50 °C</span>
                 </div>
               </div>
 
-              {/* Humidity */}
               <div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium text-zinc-700">Relative humidity</span>
-                  <span className="font-mono tabular-nums text-zinc-900">{humidity} %</span>
+                  <span className="font-medium text-zinc-400">Relative humidity</span>
+                  <span className="font-mono tabular-nums text-zinc-200">{humidity} %</span>
                 </div>
                 <input
                   type="range" min={20} max={100} step={1} value={humidity}
                   onChange={(e) => setHumidity(parseFloat(e.target.value))}
-                  className="mt-2 w-full accent-violet-600"
+                  className="slider-humidity mt-2 w-full"
                 />
-                <div className="mt-1 flex justify-between text-xs text-zinc-400">
+                <div className="mt-1 flex justify-between text-xs text-zinc-600">
                   <span>20 %</span><span>100 %</span>
                 </div>
               </div>
             </div>
-
-
           </section>
 
           {/* Simulated recommendation */}
           {simulation ? (
             <>
-              <section className={`rounded-2xl border-2 p-6 shadow-md ${
+              <section className={`rounded-2xl border-2 p-6 ${
                 simulation.winner
                   ? simWinnerChanged
-                    ? "border-violet-500 bg-gradient-to-br from-violet-50 to-white"
-                    : "border-emerald-600 bg-gradient-to-br from-emerald-50 to-white"
-                  : "border-red-400 bg-gradient-to-br from-red-50 to-white"
+                    ? "border-violet-700/60 bg-gradient-to-br from-violet-950/60 to-zinc-900"
+                    : "border-emerald-700/60 bg-gradient-to-br from-emerald-950/60 to-zinc-900"
+                  : "border-red-700/60 bg-gradient-to-br from-red-950/40 to-zinc-900"
               }`}>
                 <p className="text-xs font-bold uppercase tracking-wide text-zinc-500">
                   Simulated recommendation
                   {simWinnerChanged ? (
-                    <span className="ml-2 rounded-full bg-violet-100 px-2 py-0.5 text-violet-800">
+                    <span className="ml-2 rounded-full bg-violet-900/40 px-2 py-0.5 text-violet-400 ring-1 ring-violet-700/40">
                       Changed
                     </span>
                   ) : null}
@@ -771,37 +830,34 @@ export function RecommendationClient({
 
                 {simulation.winner ? (
                   <>
-                    <h2 className="mt-1 text-3xl font-bold text-zinc-900">
+                    <h2 className="mt-1 text-3xl font-bold text-zinc-100">
                       {simulation.winner.marketName}
                     </h2>
-                    <p className="mt-3 text-4xl font-bold tabular-nums text-zinc-900">
+                    <p className="mt-3 text-4xl font-bold tabular-nums text-emerald-400">
                       {formatInr(simulation.winner.simProfit)}
                     </p>
-                    <p className="mt-1 text-sm text-zinc-600">Simulated expected profit</p>
+                    <p className="mt-1 text-sm text-zinc-500">Simulated expected profit</p>
                     <div className="mt-3 flex items-center gap-2 text-sm">
                       <span className="text-zinc-500">Quality at arrival</span>
                       <QualityBar value={simulation.winner.qArr} qMin={qMin} />
-                      <span className="text-xs text-zinc-400">
-                        (Q_MIN = {qMin})
-                      </span>
                     </div>
 
                     {simWinnerChanged ? (
-                      <p className="mt-3 rounded-lg bg-violet-100 px-3 py-2 text-sm text-violet-900">
+                      <p className="mt-3 rounded-lg border border-violet-700/40 bg-violet-950/30 px-3 py-2 text-sm text-violet-400">
                         Under live conditions the recommended market is{" "}
                         <strong>{data.evaluation.recommendedMarketName}</strong> — these simulated
                         conditions change the selection.
                       </p>
                     ) : (
-                      <p className="mt-3 text-sm text-emerald-800">
+                      <p className="mt-3 text-sm text-emerald-500">
                         Same market as live recommendation.
                       </p>
                     )}
                   </>
                 ) : (
                   <>
-                    <h2 className="mt-1 text-xl font-bold text-red-800">No feasible market</h2>
-                    <p className="mt-2 text-sm text-zinc-600">
+                    <h2 className="mt-1 text-xl font-bold text-red-400">No feasible market</h2>
+                    <p className="mt-2 text-sm text-zinc-500">
                       At {tempC.toFixed(1)} °C / {humidity}% humidity, quality at arrival drops
                       below Q_MIN ({qMin}) for every route. The batch cannot be profitably dispatched
                       under these conditions.
@@ -812,11 +868,11 @@ export function RecommendationClient({
 
               {/* Per-market impact table */}
               <section>
-                <h2 className="mb-3 text-lg font-bold text-zinc-900">Market impact</h2>
-                <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white shadow-sm">
+                <h2 className="mb-3 text-lg font-bold text-zinc-100">Market impact</h2>
+                <div className="overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900">
                   <table className="w-full min-w-[640px] border-collapse text-sm">
                     <thead>
-                      <tr className="border-b border-zinc-200 bg-zinc-50 text-left text-xs font-semibold uppercase text-zinc-500">
+                      <tr className="border-b border-zinc-800 bg-zinc-800/50 text-left text-xs font-semibold uppercase text-zinc-500">
                         <th className="px-3 py-3">Market</th>
                         <th className="px-3 py-3 text-right">Q packed</th>
                         <th className="px-3 py-3">Q at arrival</th>
@@ -834,24 +890,26 @@ export function RecommendationClient({
                         return (
                           <tr
                             key={m.marketId}
-                            className={`border-b border-zinc-100 ${
+                            className={`border-b border-zinc-800 ${
                               isSimWinner
                                 ? simWinnerChanged
-                                  ? "bg-violet-50/60"
-                                  : "bg-emerald-50/60"
-                                : "hover:bg-zinc-50/60"
+                                  ? "bg-violet-950/40"
+                                  : "bg-emerald-950/40"
+                                : "hover:bg-zinc-800/40"
                             }`}
                           >
-                            <td className="px-3 py-2.5 font-medium text-zinc-900">
+                            <td className="px-3 py-2.5 font-medium text-zinc-200">
                               {m.marketName}
                               {isSimWinner ? (
                                 <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-xs font-semibold ${
-                                  simWinnerChanged ? "bg-violet-100 text-violet-800" : "bg-emerald-100 text-emerald-800"
+                                  simWinnerChanged
+                                    ? "bg-violet-900/40 text-violet-400 ring-1 ring-violet-700/40"
+                                    : "bg-emerald-900/40 text-emerald-400 ring-1 ring-emerald-700/40"
                                 }`}>
                                   {simWinnerChanged ? "Sim winner" : "Winner"}
                                 </span>
                               ) : isLiveWinner && simWinnerChanged ? (
-                                <span className="ml-1.5 rounded-full bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-500">
+                                <span className="ml-1.5 rounded-full bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-500 ring-1 ring-zinc-700">
                                   Live winner
                                 </span>
                               ) : null}
@@ -864,23 +922,23 @@ export function RecommendationClient({
                             </td>
                             <td className="px-3 py-2.5 text-center">
                               {m.simFeasible ? (
-                                <span className="font-semibold text-emerald-700">Yes</span>
+                                <span className="font-semibold text-emerald-400">Yes</span>
                               ) : (
-                                <span className="font-semibold text-red-600">No</span>
+                                <span className="font-semibold text-red-400">No</span>
                               )}
                               {feasChanged ? (
-                                <span className="ml-1 text-xs text-amber-600">
+                                <span className="ml-1 text-xs text-amber-400">
                                   {m.simFeasible ? "(↑ was No)" : "(↓ was Yes)"}
                                 </span>
                               ) : null}
                             </td>
                             <td className={`px-3 py-2.5 text-right font-mono ${
-                              m.simFeasible ? "text-zinc-900" : "text-zinc-400"
+                              m.simFeasible ? "text-emerald-400" : "text-zinc-600"
                             }`}>
                               {m.simFeasible ? formatInr(m.simProfit) : "—"}
                             </td>
                             <td className={`px-3 py-2.5 text-right font-mono ${
-                              m.feasible ? "text-zinc-900" : "text-zinc-400"
+                              m.feasible ? "text-zinc-300" : "text-zinc-600"
                             }`}>
                               {formatInr(m.expectedProfit)}
                             </td>
@@ -893,26 +951,262 @@ export function RecommendationClient({
               </section>
             </>
           ) : (
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-8 text-center text-sm text-zinc-500">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-8 text-center text-sm text-zinc-500">
               Quality packed data not available — run the handling evaluation first.
             </div>
           )}
         </div>
       ) : null}
 
+      {/* ── Forecast tab ───────────────────────────────────────────────────── */}
+      {activeTab === "forecast" ? (
+        <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6">
+          {forecastLoading ? (
+            <div className="flex min-h-[30vh] items-center justify-center text-zinc-500">
+              Loading forecast…
+            </div>
+          ) : forecastErr ? (
+            <div className="rounded-xl border border-red-800/40 bg-red-950/30 px-4 py-3 text-sm text-red-400">
+              {forecastErr}
+            </div>
+          ) : !forecastData?.hasData ? (
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-8 text-center text-sm text-zinc-500">
+              No forecast data yet — run the full pipeline (including the uncertainty agent) first.
+            </div>
+          ) : (() => {
+            const fd = forecastData;
+            const mcWinner = fd.markets.find((m) => m.marketId === fd.mcRecommendedMarketId);
+            const gatedMarkets = fd.markets.filter((m) => m.gated);
+
+            // Normalise bar positions across all markets
+            const allWorst  = fd.markets.map((m) => m.netProfitWorst);
+            const allBest   = fd.markets.map((m) => m.netProfitBest);
+            const globalMin = Math.min(...allWorst);
+            const globalMax = Math.max(...allBest);
+            const PAD = 6; // % padding each side so ticks don't clip
+            function toBarPct(v: number): number {
+              if (globalMax === globalMin) return PAD;
+              return PAD + ((v - globalMin) / (globalMax - globalMin)) * (100 - PAD * 2);
+            }
+
+            return (
+              <>
+                {/* Winner hero */}
+                {mcWinner ? (
+                  <section className="rounded-2xl border-2 border-emerald-700/60 bg-gradient-to-br from-emerald-950/60 to-zinc-900 p-6">
+                    <p className="text-xs font-bold uppercase tracking-widest text-emerald-500">
+                      Best market for this batch
+                    </p>
+                    <h2 className="mt-1 text-2xl font-bold text-zinc-100">{mcWinner.marketName}</h2>
+
+                    <div className="mt-4 flex flex-wrap items-end gap-5">
+                      <div>
+                        <p className="text-4xl font-bold tabular-nums text-emerald-400">
+                          {formatInr(mcWinner.netProfitLikely)}
+                        </p>
+                        <p className="mt-1 text-sm text-zinc-500">Most likely profit</p>
+                      </div>
+                      <div className="flex gap-3">
+                        <div className="rounded-xl border border-zinc-700 bg-zinc-900/60 px-4 py-2.5 text-center">
+                          <p className="font-mono text-base font-bold text-red-400 tabular-nums">
+                            {formatInr(mcWinner.netProfitWorst)}
+                          </p>
+                          <p className="mt-1 text-xs text-zinc-500">Worst case</p>
+                        </div>
+                        <div className="rounded-xl border border-zinc-700 bg-zinc-900/60 px-4 py-2.5 text-center">
+                          <p className="font-mono text-base font-bold text-emerald-400 tabular-nums">
+                            {formatInr(mcWinner.netProfitBest)}
+                          </p>
+                          <p className="mt-1 text-xs text-zinc-500">Best case</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {(() => {
+                      const count = Math.round(mcWinner.recommendationStability * mcWinner.nSimulations);
+                      const pct = ((count / mcWinner.nSimulations) * 100).toFixed(1).replace(/\.0$/, "");
+                      return (
+                        <div className="mt-5 flex items-center gap-4 rounded-xl bg-black/20 px-4 py-3">
+                          <div className="flex-1">
+                            <p className="text-sm font-bold text-zinc-100">
+                              {mcWinner.recommendationStability >= 0.85 ? "High confidence" : mcWinner.recommendationStability >= 0.70 ? "Moderate confidence" : "Low confidence"}
+                            </p>
+                            <p className="mt-1 text-xs leading-relaxed text-zinc-500">
+                              This market came out on top in {count.toLocaleString("en-IN")} out of {mcWinner.nSimulations.toLocaleString("en-IN")} scenarios we tested
+                            </p>
+                          </div>
+                          <p className="font-mono text-2xl font-bold text-emerald-400 tabular-nums">
+                            {pct}%
+                          </p>
+                        </div>
+                      );
+                    })()}
+                  </section>
+                ) : null}
+
+                {/* Gate warning */}
+                {gatedMarkets.length > 0 ? (
+                  <div className="rounded-xl border border-amber-700/40 bg-amber-950/20 px-4 py-3 text-sm leading-relaxed text-amber-400">
+                    <strong>{gatedMarkets.map((m) => m.marketName).join(", ")}</strong>{" "}
+                    {gatedMarkets.length === 1 ? "was" : "were"} excluded — produce arriving there had less than a 70% chance of meeting quality standards.
+                    We only recommend markets where your batch is very likely to arrive in good condition.
+                  </div>
+                ) : null}
+
+                {/* Market range list */}
+                <section>
+                  <h2 className="mb-3 text-lg font-bold text-zinc-100">Profit forecast per market</h2>
+                  <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900">
+                    {/* Header */}
+                    <div className="grid grid-cols-[140px_1fr_220px_100px] gap-3 border-b border-zinc-800 bg-zinc-800/50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                      <div>Market</div>
+                      <div>Profit range</div>
+                      <div className="grid grid-cols-3 text-center">
+                        <span>Worst</span>
+                        <span>Likely</span>
+                        <span>Best</span>
+                      </div>
+                      <div className="text-right">Success chance</div>
+                    </div>
+
+                    {fd.markets.map((m) => {
+                      const isWinner = m.marketId === fd.mcRecommendedMarketId;
+                      const worstPct  = toBarPct(m.netProfitWorst);
+                      const likelyPct = toBarPct(m.netProfitLikely);
+                      const bestPct   = toBarPct(m.netProfitBest);
+                      const fillColor = m.gated ? "#ef4444" : isWinner ? "#10b981" : "#f59e0b";
+                      const likelyColor = m.gated ? "text-zinc-500" : isWinner ? "text-emerald-400" : "text-amber-400";
+                      // recommendationStability = fraction of simulations this market was #1 (mutually exclusive across markets)
+                      const successCount = Math.round(m.recommendationStability * m.nSimulations);
+                      const successPct = ((successCount / m.nSimulations) * 100).toFixed(1).replace(/\.0$/, "");
+
+                      return (
+                        <div
+                          key={m.marketId}
+                          className={`grid grid-cols-[140px_1fr_220px_100px] gap-3 border-b border-zinc-800/60 px-4 py-4 last:border-b-0 ${
+                            isWinner ? "bg-emerald-950/25" : m.gated ? "opacity-45" : ""
+                          }`}
+                        >
+                          {/* Name + badge */}
+                          <div className="flex flex-col justify-center gap-1">
+                            <span className={`text-sm font-semibold ${m.gated ? "text-zinc-500" : "text-zinc-200"}`}>
+                              {m.marketName}
+                            </span>
+                            {isWinner ? (
+                              <span className="inline-block w-fit rounded-full bg-emerald-900/50 px-2 py-0.5 text-xs font-semibold text-emerald-400 ring-1 ring-emerald-700/40">
+                                Recommended
+                              </span>
+                            ) : m.gated ? (
+                              <span className="inline-block w-fit rounded-full bg-red-900/30 px-2 py-0.5 text-xs font-semibold text-red-400 ring-1 ring-red-800/40">
+                                Too risky
+                              </span>
+                            ) : null}
+                          </div>
+
+                          {/* Range bar */}
+                          <div className="flex items-center">
+                            <div className="relative h-6 w-full">
+                              {/* Track */}
+                              <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-zinc-700/60" />
+                              {/* Fill between worst and best */}
+                              <div
+                                className="absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full"
+                                style={{
+                                  left: `${worstPct}%`,
+                                  width: `${bestPct - worstPct}%`,
+                                  background: fillColor,
+                                  opacity: 0.3,
+                                }}
+                              />
+                              {/* Worst tick */}
+                              <div
+                                className="absolute top-1/2 w-0.5 -translate-y-1/2 rounded-sm"
+                                style={{ left: `${worstPct}%`, height: "12px", marginTop: "-6px", background: "#f87171", opacity: 0.8 }}
+                              />
+                              {/* Likely tick (wider) */}
+                              <div
+                                className="absolute top-1/2 w-1 -translate-y-1/2 rounded-sm"
+                                style={{ left: `${likelyPct}%`, height: "18px", marginTop: "-9px", background: fillColor }}
+                              />
+                              {/* Best tick */}
+                              <div
+                                className="absolute top-1/2 w-0.5 -translate-y-1/2 rounded-sm"
+                                style={{ left: `${bestPct}%`, height: "12px", marginTop: "-6px", background: "#34d399", opacity: 0.8 }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Worst / Likely / Best trio */}
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {[
+                              { v: m.netProfitWorst,  label: "Worst", color: "text-red-400" },
+                              { v: m.netProfitLikely, label: "Likely", color: likelyColor },
+                              { v: m.netProfitBest,   label: "Best",  color: m.gated ? "text-zinc-500" : "text-zinc-300" },
+                            ].map(({ v, label, color }) => (
+                              <div key={label} className="rounded-lg bg-zinc-800/60 px-2 py-2 text-center">
+                                <p className={`font-mono text-xs font-bold tabular-nums ${color}`}>
+                                  {formatInr(v)}
+                                </p>
+                                <p className="mt-0.5 text-xs text-zinc-600">{label}</p>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Success chance */}
+                          <div className="flex flex-col items-end justify-center gap-0.5">
+                            <span
+                              className={`font-mono text-lg font-bold tabular-nums ${
+                                m.gated ? "text-red-400" : m.recommendationStability >= 0.85 ? "text-emerald-400" : m.recommendationStability >= 0.70 ? "text-amber-400" : "text-red-400"
+                              }`}
+                            >
+                              {successPct}%
+                            </span>
+                            <span className="text-xs text-zinc-600">Success chance</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {/* Remainder: simulations where no market was feasible */}
+                    {(() => {
+                      const assignedStability = fd.markets.reduce((a, m) => a + m.recommendationStability, 0);
+                      const noMarketFrac = Math.max(0, 1 - assignedStability);
+                      const noMarketPct = (noMarketFrac * 100).toFixed(1).replace(/\.0$/, "");
+                      if (noMarketFrac < 0.0005) return null;
+                      return (
+                        <div className="grid grid-cols-[140px_1fr_220px_100px] gap-3 border-t border-zinc-800/60 bg-zinc-900/60 px-4 py-3">
+                          <div className="col-span-3 flex items-center">
+                            <span className="text-xs text-zinc-500">No feasible market — produce below quality threshold in these scenarios</span>
+                          </div>
+                          <div className="flex flex-col items-end justify-center gap-0.5">
+                            <span className="font-mono text-lg font-bold tabular-nums text-zinc-500">{noMarketPct}%</span>
+                            <span className="text-xs text-zinc-600">No winner</span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </section>
+
+
+              </>
+            );
+          })()}
+        </div>
+      ) : null}
+
       {/* ── Bottom action bar ──────────────────────────────────────────────── */}
-      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-zinc-200 bg-white/95 px-4 py-3 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] backdrop-blur sm:px-6">
+      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-zinc-800 bg-zinc-900/95 px-4 py-3 backdrop-blur sm:px-6">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {!data.edge.dispatched ? (
               canDispatch ? (
                 <button
                   type="button"
-                  onClick={() => setConfirmDispatch(true)}
+                  onClick={() => { setDispatchErr(null); setConfirmDispatch(true); }}
                   disabled={busy}
-                  className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+                  className="rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-600 disabled:opacity-50"
                 >
-                  Dispatch to {wc.marketName}
+                  Confirm recommendation: {wc.marketName}
                 </button>
               ) : (
                 <button
@@ -922,10 +1216,10 @@ export function RecommendationClient({
                     q != null && q < qMin
                       ? "Batch below minimum quality threshold"
                       : data.batch.status !== "Evaluated"
-                        ? "Mark batch as Evaluated in Airtable first"
+                        ? "Batch must be Evaluated before dispatching"
                         : "Cannot dispatch"
                   }
-                  className="cursor-not-allowed rounded-xl bg-zinc-300 px-4 py-2.5 text-sm font-bold text-zinc-600"
+                  className="cursor-not-allowed rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm font-bold text-zinc-500"
                 >
                   Dispatch disabled
                 </button>
@@ -933,34 +1227,41 @@ export function RecommendationClient({
             ) : null}
             <Link
               href="/batches"
-              className="inline-flex items-center rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
+              className="inline-flex items-center rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm font-semibold text-zinc-300 hover:bg-zinc-700"
             >
               Back to overview
             </Link>
-            <Link
-              href={`/batches/${recordId}/audit`}
-              className="inline-flex items-center self-center text-xs text-zinc-500 underline underline-offset-2 hover:text-zinc-700"
-            >
-              Full audit
-            </Link>
+            {userRole === "admin" ? (
+              <Link
+                href={`/batches/${recordId}/audit`}
+                className="inline-flex items-center self-center text-xs text-zinc-500 underline underline-offset-2 hover:text-zinc-300"
+              >
+                Full audit
+              </Link>
+            ) : null}
           </div>
         </div>
       </div>
 
       {/* ── Dispatch confirmation modal ────────────────────────────────────── */}
       {confirmDispatch ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="max-w-md rounded-2xl bg-white p-6 shadow-xl">
-            <p className="font-semibold text-zinc-900">Confirm dispatch</p>
-            <p className="mt-2 text-sm text-zinc-600">
-              Confirm dispatch of <strong>{data.batch.batchId}</strong> to{" "}
-              <strong>{wc.marketName}</strong>? This cannot be undone.
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
+            <p className="font-semibold text-zinc-100">Confirm recommendation</p>
+            <p className="mt-2 text-sm text-zinc-400">
+              Record <strong className="text-zinc-200">{wc.marketName}</strong> as the recommended dispatch destination for batch{" "}
+              <strong className="text-zinc-200">{data.batch.batchId}</strong>? This cannot be undone.
             </p>
+            {dispatchErr ? (
+              <p className="mt-3 rounded-lg border border-red-800/40 bg-red-950/30 px-3 py-2 text-sm text-red-400">
+                {dispatchErr}
+              </p>
+            ) : null}
             <div className="mt-6 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setConfirmDispatch(false)}
-                className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium"
+                className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800"
               >
                 Cancel
               </button>
@@ -968,7 +1269,7 @@ export function RecommendationClient({
                 type="button"
                 onClick={() => void dispatch()}
                 disabled={busy}
-                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-50"
               >
                 {busy ? "Saving..." : "Confirm"}
               </button>
