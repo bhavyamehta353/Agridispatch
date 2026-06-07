@@ -167,6 +167,7 @@ export default function RecommendedRouteMap({
     <div className="relative z-0 w-full overflow-hidden rounded-2xl border border-zinc-200/80 shadow-inner">
       <div className="h-[clamp(16rem,38vh,24rem)] w-full sm:h-[clamp(18rem,42vh,28rem)]">
         <MapContainer
+          key={`${farm.id}-${market.id}`}
           center={routing.path[0] ?? fallbackPath[0]}
           zoom={8}
           className="h-full w-full"
