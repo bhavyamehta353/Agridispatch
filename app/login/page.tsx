@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { AgriDispatchLogo } from "../components/agri-dispatch-logo";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -39,83 +40,89 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen bg-zinc-100 px-4 py-10 text-zinc-950">
-      <div className="mx-auto grid min-h-[calc(100vh-5rem)] max-w-6xl gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
-        <section className="order-2 lg:order-1">
-          <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">
-                  Login
-                </p>
-                <h1 className="mt-2 text-2xl font-black tracking-tight">
-                  Welcome back
-                </h1>
-              </div>
-              <Link
-                href="/signup"
-                className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
-              >
-                Signup
-              </Link>
-            </div>
+    <main
+      className="relative min-h-screen overflow-hidden bg-zinc-950 flex flex-col items-center justify-center gap-8 px-4 py-12"
+      style={{
+        background: "linear-gradient(135deg, #052e16 0%, #09090b 55%)",
+      }}
+    >
+      {/* Radial glow */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(ellipse 65% 55% at 15% 18%, rgba(16,185,129,0.13) 0%, transparent 70%)",
+        }}
+      />
 
-            <form onSubmit={onSubmit} className="mt-6 space-y-5">
-              <label className="block text-sm font-medium text-zinc-700">
-                Name
-                <input
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-zinc-300 px-3 py-3 text-zinc-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                  placeholder="Enter your name"
-                />
-              </label>
-
-              <label className="block text-sm font-medium text-zinc-700">
-                Password
-                <input
-                  required
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-zinc-300 px-3 py-3 text-zinc-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                  placeholder="Enter password"
-                />
-              </label>
-
-              {message ? (
-                <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">
-                  {message}
-                </p>
-              ) : null}
-
-              <button
-                type="submit"
-                disabled={status === "loading"}
-                className="w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60"
-              >
-                {status === "loading" ? "Logging in..." : "Login"}
-              </button>
-            </form>
+      {/* Logo */}
+      <Link href="/" className="relative z-10 flex items-center gap-3 group">
+        <AgriDispatchLogo className="h-10 w-10 shadow-lg shadow-emerald-500/20" />
+        <div>
+          <div className="text-sm font-semibold text-zinc-200 group-hover:text-white transition-colors">
+            AgriDispatch
           </div>
-        </section>
+          <div className="text-xs text-zinc-500">Fresh produce operations</div>
+        </div>
+      </Link>
 
-        <section className="order-1 lg:order-2">
-          <Link href="/" className="inline-flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500 text-sm font-black text-zinc-950">
-              DT
-            </span>
-            <span className="font-semibold">Digital Twin</span>
+      {/* Glass card */}
+      <div className="relative z-10 w-full max-w-sm rounded-2xl border border-white/[0.12] bg-white/[0.055] p-8 shadow-2xl shadow-black/50 backdrop-blur-xl">
+        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">
+          Login
+        </p>
+        <h1 className="mt-1.5 text-xl font-black tracking-tight text-white">
+          Welcome back
+        </h1>
+
+        <form onSubmit={onSubmit} className="mt-7 space-y-4">
+          <label className="block text-xs font-semibold text-zinc-400">
+            Name
+            <input
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Enter your name"
+              className="mt-1.5 w-full rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 outline-none transition focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/20"
+            />
+          </label>
+
+          <label className="block text-xs font-semibold text-zinc-400">
+            Password
+            <input
+              required
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter password"
+              className="mt-1.5 w-full rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 outline-none transition focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/20"
+            />
+          </label>
+
+          {message ? (
+            <p className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+              {message}
+            </p>
+          ) : null}
+
+          <button
+            type="submit"
+            disabled={status === "loading"}
+            className="mt-2 w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-black text-white shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-400 disabled:opacity-50"
+          >
+            {status === "loading" ? "Logging in..." : "Login"}
+          </button>
+        </form>
+
+        <p className="mt-6 text-center text-xs text-zinc-600">
+          Don&apos;t have an account?{" "}
+          <Link
+            href="/signup"
+            className="font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
+          >
+            Sign up
           </Link>
-          <h2 className="mt-8 text-4xl font-black tracking-tight sm:text-5xl">
-            Continue to your role workspace.
-          </h2>
-          <p className="mt-4 max-w-xl text-sm leading-6 text-zinc-600">
-            Admin users go to batch operations, farmers go to harvest intake,
-            and logistics users go to route conditions.
-          </p>
-        </section>
+        </p>
       </div>
     </main>
   );

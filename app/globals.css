@@ -33,3 +33,46 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Gradient range sliders for the condition simulator */
+.slider-temp,
+.slider-humidity {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 9999px;
+  outline: none;
+  cursor: pointer;
+}
+
+.slider-temp {
+  background: linear-gradient(to right, #fbbf24, #f97316, #ef4444);
+}
+
+.slider-humidity {
+  background: linear-gradient(to right, #bfdbfe, #60a5fa, #2563eb, #1e3a8a);
+}
+
+.slider-temp::-webkit-slider-thumb,
+.slider-humidity::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #f4f4f5;
+  border: 2px solid #3f3f46;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+  cursor: pointer;
+}
+
+.slider-temp::-moz-range-thumb,
+.slider-humidity::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #f4f4f5;
+  border: 2px solid #3f3f46;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+  cursor: pointer;
+}

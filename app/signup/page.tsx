@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { AgriDispatchLogo } from "../components/agri-dispatch-logo";
 
 const roles = [
-  { value: "admin", label: "Admin" },
   { value: "farmers", label: "Farmer" },
   { value: "logistics", label: "Logistics" },
+  { value: "admin", label: "Admin" },
 ] as const;
 
 type RoleValue = (typeof roles)[number]["value"];
@@ -48,98 +49,111 @@ export default function SignupPage() {
   }
 
   return (
-    <main className="min-h-screen bg-zinc-950 px-4 py-10 text-white">
-      <div className="mx-auto grid min-h-[calc(100vh-5rem)] max-w-6xl gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
-        <section>
-          <Link href="/" className="inline-flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500 text-sm font-black text-zinc-950">
-              DT
-            </span>
-            <span className="font-semibold">Digital Twin</span>
-          </Link>
-          <h1 className="mt-8 text-4xl font-black tracking-tight sm:text-5xl">
-            Create your operations account.
-          </h1>
-          <p className="mt-4 max-w-xl text-sm leading-6 text-zinc-300">
-            Choose the role that matches how you use the system. Your password
-            is hashed before it is stored in MongoDB.
-          </p>
-        </section>
+    <main
+      className="relative min-h-screen overflow-hidden flex flex-col items-center justify-center gap-8 px-4 py-12"
+      style={{
+        background: "linear-gradient(135deg, #052e16 0%, #09090b 55%)",
+      }}
+    >
+      {/* Radial glow */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(ellipse 65% 55% at 15% 18%, rgba(16,185,129,0.13) 0%, transparent 70%)",
+        }}
+      />
 
-        <section className="rounded-2xl border border-white/10 bg-white p-6 text-zinc-950 shadow-2xl shadow-black/30 sm:p-8">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">
-                Signup
-              </p>
-              <h2 className="mt-2 text-2xl font-black tracking-tight">
-                New user
-              </h2>
+      {/* Logo */}
+      <Link href="/" className="relative z-10 flex items-center gap-3 group">
+        <AgriDispatchLogo className="h-10 w-10 shadow-lg shadow-emerald-500/20" />
+        <div>
+          <div className="text-sm font-semibold text-zinc-200 group-hover:text-white transition-colors">
+            AgriDispatch
+          </div>
+          <div className="text-xs text-zinc-500">Fresh produce operations</div>
+        </div>
+      </Link>
+
+      {/* Glass card */}
+      <div className="relative z-10 w-full max-w-sm rounded-2xl border border-white/[0.12] bg-white/[0.055] p-8 shadow-2xl shadow-black/50 backdrop-blur-xl">
+        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">
+          Create account
+        </p>
+        <h1 className="mt-1.5 text-xl font-black tracking-tight text-white">
+          New user
+        </h1>
+
+        <form onSubmit={onSubmit} className="mt-7 space-y-4">
+          <label className="block text-xs font-semibold text-zinc-400">
+            Name
+            <input
+              required
+              minLength={2}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Enter your name"
+              className="mt-1.5 w-full rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 outline-none transition focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/20"
+            />
+          </label>
+
+          <div>
+            <p className="text-xs font-semibold text-zinc-400 mb-2">Role</p>
+            <div className="flex gap-2">
+              {roles.map((r) => (
+                <button
+                  key={r.value}
+                  type="button"
+                  onClick={() => setRole(r.value)}
+                  className={`flex-1 rounded-xl border py-2 text-xs font-bold transition ${
+                    role === r.value
+                      ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-400"
+                      : "border-white/10 bg-white/[0.06] text-zinc-500 hover:border-white/20 hover:text-zinc-300"
+                  }`}
+                >
+                  {r.label}
+                </button>
+              ))}
             </div>
-            <Link
-              href="/login"
-              className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
-            >
-              Login
-            </Link>
           </div>
 
-          <form onSubmit={onSubmit} className="mt-6 space-y-5">
-            <label className="block text-sm font-medium text-zinc-700">
-              Name
-              <input
-                required
-                minLength={2}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="mt-1.5 w-full rounded-xl border border-zinc-300 px-3 py-3 text-zinc-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                placeholder="Enter your name"
-              />
-            </label>
+          <label className="block text-xs font-semibold text-zinc-400">
+            Password
+            <input
+              required
+              minLength={6}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Minimum 6 characters"
+              className="mt-1.5 w-full rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 outline-none transition focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/20"
+            />
+          </label>
 
-            <label className="block text-sm font-medium text-zinc-700">
-              Role
-              <select
-                value={role}
-                onChange={(e) => setRole(e.target.value as RoleValue)}
-                className="mt-1.5 w-full rounded-xl border border-zinc-300 bg-white px-3 py-3 text-zinc-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-              >
-                {roles.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+          {message ? (
+            <p className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+              {message}
+            </p>
+          ) : null}
 
-            <label className="block text-sm font-medium text-zinc-700">
-              Password
-              <input
-                required
-                minLength={6}
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="mt-1.5 w-full rounded-xl border border-zinc-300 px-3 py-3 text-zinc-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                placeholder="Minimum 6 characters"
-              />
-            </label>
+          <button
+            type="submit"
+            disabled={status === "loading"}
+            className="mt-2 w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-black text-white shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-400 disabled:opacity-50"
+          >
+            {status === "loading" ? "Creating account..." : "Create account"}
+          </button>
+        </form>
 
-            {message ? (
-              <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">
-                {message}
-              </p>
-            ) : null}
-
-            <button
-              type="submit"
-              disabled={status === "loading"}
-              className="w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60"
-            >
-              {status === "loading" ? "Creating account..." : "Create account"}
-            </button>
-          </form>
-        </section>
+        <p className="mt-6 text-center text-xs text-zinc-600">
+          Already have an account?{" "}
+          <Link
+            href="/login"
+            className="font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
+          >
+            Login
+          </Link>
+        </p>
       </div>
     </main>
   );

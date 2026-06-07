@@ -14,9 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Digital Twin Operations",
+  title: "AgriDispatch",
   description:
-    "Fresh produce digital twin for harvest intake, batch evaluation, market pricing, route risk, and dispatch decisions.",
+    "Fresh produce dispatch platform for harvest intake, batch evaluation, market pricing, route risk, and dispatch decisions.",
 };
 
 export default function RootLayout({
