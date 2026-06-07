@@ -70,14 +70,22 @@ export async function POST(request: Request) {
 
   const now = new Date();
   const passwordHash = await bcrypt.hash(password, 12);
-  const inserted = await users.insertOne({
-    name,
-    nameKey: key,
-    role,
-    passwordHash,
-    createdAt: now,
-    updatedAt: now,
-  });
+  let inserted: Awaited<ReturnType<typeof users.insertOne>>;
+  try {
+    inserted = await users.insertOne({
+      name,
+      nameKey: key,
+      role,
+      passwordHash,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } catch {
+    return NextResponse.json(
+      { error: "A user with this name and role already exists." },
+      { status: 409 }
+    );
+  }
 
   const user = { _id: inserted.insertedId, name, role };
   const token = createAuthToken(user);

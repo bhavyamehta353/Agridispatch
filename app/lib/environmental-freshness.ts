@@ -7,8 +7,8 @@ export function environmentalDataFreshnessLevel(
   ageHours: number | null
 ): EnvFreshnessLevel {
   if (ageHours === null) return "none";
-  if (ageHours <= 3) return "green";
-  if (ageHours <= 8) return "amber";
+  if (ageHours <= 12) return "green";
+  if (ageHours <= 24) return "amber";
   return "red";
 }
 

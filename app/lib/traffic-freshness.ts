@@ -15,8 +15,8 @@ export function trafficDataFreshnessLevel(
   ageHours: number | null
 ): TrafficFreshnessLevel {
   if (ageHours === null) return "none";
-  if (ageHours <= 2) return "green";
-  if (ageHours <= 6) return "amber";
+  if (ageHours <= 12) return "green";
+  if (ageHours <= 24) return "amber";
   return "red";
 }
 

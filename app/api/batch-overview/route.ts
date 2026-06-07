@@ -113,9 +113,9 @@ export async function GET(request: NextRequest) {
 
     const [batchRecords, handlingRecords, evaluationRecords, marketRecords] =
       await Promise.all([
-        base("Farmer_Batches").select().all(),
-        base("Handling_Quality").select().all(),
-        base("Market_Evaluation").select().all(),
+        base("Farmer_Batches").select({ maxRecords: 500 }).all(),
+        base("Handling_Quality").select({ maxRecords: 500 }).all(),
+        base("Market_Evaluation").select({ maxRecords: 1000 }).all(),
         base("Markets").select().all(),
       ]);
 

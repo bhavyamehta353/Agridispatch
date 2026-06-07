@@ -99,6 +99,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
+  // Audit page is admin-only
+  if (/^\/batches\/[^/]+\/audit(\/|$)/.test(pathname) && role !== "admin") {
+    return NextResponse.redirect(new URL("/", request.url));
+  }
+
   return NextResponse.next();
 }
 

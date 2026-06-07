@@ -10,13 +10,11 @@ export async function getMongoDb() {
     throw new Error("Missing MONGODB_URL environment variable.");
   }
 
-  const clientPromise =
-    globalThis.__digitalTwinMongoClientPromise ??
-    new MongoClient(uri).connect();
-
-  if (process.env.NODE_ENV !== "production") {
-    globalThis.__digitalTwinMongoClientPromise = clientPromise;
+  if (!globalThis.__digitalTwinMongoClientPromise) {
+    globalThis.__digitalTwinMongoClientPromise = new MongoClient(uri).connect();
   }
+
+  const clientPromise = globalThis.__digitalTwinMongoClientPromise;
 
   const client = await clientPromise;
   return client.db();

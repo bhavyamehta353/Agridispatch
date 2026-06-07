@@ -20,8 +20,8 @@ export function congestionFromTau(tau: number | null): CongestionLevel {
 
 export function decayFromScore(score: number | null): DecayLevel {
   if (score == null || Number.isNaN(score)) return "unknown";
-  if (score < 0.35) return "low";
-  if (score < 0.65) return "moderate";
+  if (score < 0.025) return "low";
+  if (score < 0.05) return "moderate";
   return "high";
 }
 
