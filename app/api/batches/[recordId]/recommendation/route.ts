@@ -378,6 +378,9 @@ export async function GET(
       );
       const decayBucketed = decayBucket(decayRaw);
 
+      const priceEffective = num(getField(ev as Rec, "price_effective"));
+      const fpoSupplyPct   = num(getField(ev as Rec, "fpo_supply_adjustment_pct"));
+
       return {
         marketId: m.id,
         marketName: m.name,
@@ -404,6 +407,8 @@ export async function GET(
         },
         minPrice,
         maxPrice,
+        priceEffective,
+        fpoSupplyPct,
         grossRevenue: gross,
         commissionRate: rate,
         commissionAmount: commissionAmt,
@@ -523,6 +528,7 @@ export async function GET(
         damageFactor,
         sortingBonus,
         kMultiplier,
+        weightPacked: num(handling?.get("weight_packed_kg")),
         packagingType: handling
           ? String(handling.get("packaging_type") ?? "")
           : null,

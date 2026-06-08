@@ -46,6 +46,8 @@ type MarketCol = {
   modalPrice: number | null;
   minPrice: number | null;
   maxPrice: number | null;
+  priceEffective: number | null;
+  fpoSupplyPct: number | null;
   priceArrivalDay: string | null;
   priceStale: boolean;
   distanceKm: number;
@@ -86,6 +88,7 @@ type RecPayload = {
     damageFactor: number;
     sortingBonus: number;
     kMultiplier: number;
+    weightPacked: number | null;
     packagingType: string | null;
     fillLevel: string | null;
     qualityTier: string;
@@ -151,6 +154,12 @@ const DELTA_VPD   = 0.252462;
 // Market fee constants (math_models.py §6)
 const MARKET_FEE_PCT  = 0.01;
 const COMMISSION_PCT  = 0.025;
+// Price elasticity from log-log OLS (math_models.py — Item 34)
+const PRICE_ELASTICITY: Record<string, number> = {
+  "MKT001": -0.3514,
+  "MKT002": -0.1462,
+  "MKT003": -0.2340,
+};
 
 const SEASONAL_FACTOR: Record<string, number> = {
   Jan: 0.7465, Feb: 0.9368, Mar: 1.2625, Apr: 1.6207, May: 1.5692,
@@ -177,14 +186,13 @@ function computeQualityArrival(qPacked: number, ke: number, tHr: number): number
   return Math.max(0, Math.min(1, qPacked * Math.exp(-ke * tHr)));
 }
 // math_models.py §11 — three-point linear interpolation of price by quality
+// Fallback matches Python exactly: return full modal when min/max unavailable
 function qualityAdjustedPrice(q: number, pMin: number | null, pModal: number | null, pMax: number | null, qMin: number): number | null {
   if (pModal == null) return null;
-  // Approximate min/max from modal when not available (±25% typical APMC spread)
-  const lo = pMin  ?? pModal * 0.75;
-  const hi = pMax  ?? pModal * 1.25;
-  if (q >= 0.85) return pModal + (hi - pModal) * (q - 0.85) / 0.15;
-  if (q >= qMin) return lo + (pModal - lo) * (q - qMin) / (0.85 - qMin);
-  return lo * 0.60; // distress sale
+  if (pMin == null || pMax == null) return pModal;
+  if (q >= 0.85) return pModal + (pMax - pModal) * (q - 0.85) / 0.15;
+  if (q >= qMin) return pMin + (pModal - pMin) * (q - qMin) / (0.85 - qMin);
+  return pMin * 0.60;
 }
 
 function harvestMonth(iso: string | null): string {
@@ -381,21 +389,31 @@ export function RecommendationClient({
     const kb    = computeKBase(tempC, humidity, month);
     const ke    = computeKEff(kb, data.handling.kMultiplier, data.handling.maturityGrade);
 
+    // Use weight_packed_kg (post-reject-rate) to match Python evaluation_agent
+    const weightForSim = data.handling.weightPacked ?? data.batch.weightKg;
+
     const markets = data.markets.map((m) => {
       // Use actual travel time (tBase × (1+τ)) for decay — not the logistics-penalized effectiveTravelHr
       const tDecayHr = m.tActualHr ?? m.tBaseHr * (1 + m.tau);
       const qArr       = computeQualityArrival(data.handling.qualityPacked!, ke, tDecayHr);
       const simFeasible = qArr >= data.qMin;
-      // Quality at arrival drives quality-adjusted price (math_models.py §11).
-      // Higher T/H → faster decay → lower qArr → lower effective price → lower profit.
-      // When no modal price is stored, back-calculate implied modal from stored expectedProfit.
-      const impliedModal = m.modalPrice == null && m.expectedProfit != null
-        ? (m.expectedProfit + m.logisticsCost) / (data.batch.weightKg * (1 - MARKET_FEE_PCT - COMMISSION_PCT))
-        : null;
-      const modalForSim = m.modalPrice ?? impliedModal;
+
+      // When no modal price is stored, use stored price_effective as proxy
+      const modalForSim = m.modalPrice ?? m.priceEffective ?? null;
       const pEff = qualityAdjustedPrice(qArr, m.minPrice, modalForSim, m.maxPrice, data.qMin);
-      const simProfit = simFeasible && pEff != null
-        ? Math.round(pEff * data.batch.weightKg * (1 - MARKET_FEE_PCT - COMMISSION_PCT) - m.logisticsCost)
+
+      // Apply equilibrium price adjustment (math_models.py — Item 34)
+      // Supply is fixed on the day; only quality changes with T/H sliders
+      let pAdj: number | null = pEff;
+      if (pEff != null && m.fpoSupplyPct != null) {
+        const supplyFrac = m.fpoSupplyPct / 100;
+        const elasticity = PRICE_ELASTICITY[m.marketId] ?? -0.20;
+        const adjusted = pEff * Math.pow(1 + supplyFrac, elasticity);
+        pAdj = Math.max(adjusted, pEff * 0.60);
+      }
+
+      const simProfit = simFeasible && pAdj != null
+        ? Math.round(pAdj * weightForSim * (1 - MARKET_FEE_PCT - COMMISSION_PCT) - m.logisticsCost)
         : null;
       return { ...m, qArr, simFeasible, simProfit };
     });
