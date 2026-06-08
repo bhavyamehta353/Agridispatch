@@ -246,7 +246,7 @@ export default function FarmerPage() {
                   value={harvestTime}
                   onChange={(e) => setHarvestTime(e.target.value)}
                   className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-green-600 focus:ring-2 focus:ring-green-600/20"
-                  style={{ fontFamily: "var(--font-farmer-mono), monospace" }}
+                  style={{ fontFamily: "var(--font-farmer-mono), monospace", colorScheme: "dark" }}
                 />
               </div>
 
