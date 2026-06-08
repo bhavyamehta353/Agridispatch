@@ -322,15 +322,18 @@ export async function GET(
       const storedLogi = num(getField(ev as Rec, "logistics_cost"));
       const logi = storedLogi ?? logisticsCost(distanceKm, tBaseHr, tau);
 
-      // Prefer harvest-day price → latest dated → any undated
-      const priceRow = harvestPriceByMarket.get(m.id) ?? latestPriceByMarket.get(m.id) ?? anyPriceByMarket.get(m.id) ?? null;
-      // Fall back to prices stored in evaluation record when no pricing row exists at all
+      const harvestDayRow = harvestPriceByMarket.get(m.id) ?? null;
+      const latestRow = latestPriceByMarket.get(m.id) ?? anyPriceByMarket.get(m.id) ?? null;
+      // priceRow used only for staleness indicator and display metadata
+      const priceRow = harvestDayRow ?? latestRow;
+      // Prefer harvest-day price → eval-stored price (what Python agent used) → latest dated last
+      // This prevents today's newly entered prices from inflating the simulator's modal price
       const evalModal = num(getField(ev as Rec, "price_modal", "modal_price", "price_per_kg", "modal_price_per_kg"));
       const evalMin   = num(getField(ev as Rec, "price_min", "min_price", "min_price_per_kg"));
       const evalMax   = num(getField(ev as Rec, "price_max", "max_price", "max_price_per_kg"));
-      const modal    = priceRow?.modal ?? evalModal ?? null;
-      const minPrice = priceRow?.min   ?? evalMin   ?? null;
-      const maxPrice = priceRow?.max   ?? evalMax   ?? null;
+      const modal    = harvestDayRow?.modal ?? evalModal ?? latestRow?.modal ?? null;
+      const minPrice = harvestDayRow?.min   ?? evalMin   ?? latestRow?.min   ?? null;
+      const maxPrice = harvestDayRow?.max   ?? evalMax   ?? latestRow?.max   ?? null;
       // Prices are stale if they don't match the harvest day (or today if harvest unknown)
       const priceStale = priceRow?.arrivalDay != null
         ? priceRow.arrivalDay !== refDay
