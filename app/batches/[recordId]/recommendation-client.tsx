@@ -64,6 +64,8 @@ type MarketCol = {
     timeComponent: number;
     fixed: number;
   };
+  evalModal: number | null;
+  arrivalQuality: number | null;
   expectedProfit: number | null;
   feasible: boolean;
   decayRisk: "Low" | "Medium" | "High";
@@ -399,9 +401,25 @@ export function RecommendationClient({
       const qArr       = computeQualityArrival(data.handling.qualityPacked!, ke, tDecayHr);
       const simFeasible = qArr >= data.qMin;
 
-      // When no modal price is stored, use stored price_effective as proxy
-      const modalForSim = m.modalPrice ?? m.priceEffective ?? null;
-      const pEff = qualityAdjustedPrice(qArr, m.minPrice, modalForSim, m.maxPrice, data.qMin);
+      // Anchor sim to the exact prices Python used at pipeline run time.
+      // Priority: eval-stored modal (price_modal from T_EVAL) → current market modal.
+      const evalModal = m.evalModal;
+      const modalForSim = evalModal ?? m.modalPrice ?? m.priceEffective ?? null;
+
+      // When min/max aren't available from T_PRICING, derive p_min from
+      // Python's stored price_effective + price_modal + actual arrival quality:
+      //   p_eff = p_min + (p_modal - p_min) * (qa - Q_MIN) / (0.85 - Q_MIN)
+      //   → p_min = (p_eff - p_modal * a) / (1 - a),  where a = (qa - Q_MIN) / (0.85 - Q_MIN)
+      let pMinForSim = m.minPrice;
+      if (pMinForSim == null && evalModal != null && m.priceEffective != null && m.arrivalQuality != null) {
+        const qa = m.arrivalQuality;
+        if (qa >= data.qMin && qa < 0.85) {
+          const a = (qa - data.qMin) / (0.85 - data.qMin);
+          pMinForSim = (m.priceEffective - evalModal * a) / (1 - a);
+        }
+      }
+
+      const pEff = qualityAdjustedPrice(qArr, pMinForSim, modalForSim, m.maxPrice, data.qMin);
 
       // Apply equilibrium price adjustment (math_models.py — Item 34)
       // Supply is fixed on the day; only quality changes with T/H sliders
