@@ -1,12 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AgriDispatchLogo } from "../components/agri-dispatch-logo";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
@@ -31,8 +29,7 @@ export default function LoginPage() {
         return;
       }
 
-      router.push("/");
-      router.refresh();
+      window.location.href = "/";
     } catch {
       setStatus("error");
       setMessage("Network error. Please try again.");
