@@ -46,6 +46,15 @@ def main():
 
     batch_rec_id = batch["id"]
 
+    # Guard: abort if batch is already dispatched to prevent corrupting recommendation data
+    current_status = batch["fields"].get("Status", "").lower()
+    if current_status == "dispatched":
+        raise RuntimeError(
+            f"Batch {args.batch_id} is already dispatched. "
+            f"Re-evaluation would overwrite recommendation data with inconsistent state. "
+            f"Reset batch status to 'evaluated' first if a re-run is genuinely needed."
+        )
+
     # --- Read Handling_Quality ---
     handling = at.get_one(T_HANDLING, f'{{batch_id}}="{q(args.batch_id)}"')
     if not handling:

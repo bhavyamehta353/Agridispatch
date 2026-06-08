@@ -101,6 +101,7 @@ type RecPayload = {
     winnerMarketId: string | null;
     marginOverNext: number | null;
     closeCall: boolean;
+    evalDataInconsistent: boolean;
   };
   winnerCard: {
     marketName: string;
@@ -585,6 +586,12 @@ export function RecommendationClient({
           {data.edge.allInfeasible ? (
             <div className="rounded-xl border border-red-800/40 bg-red-950/30 px-4 py-3 text-sm text-red-400">
               No feasible market — quality below Q_MIN ({qMin}) for all routes.
+            </div>
+          ) : null}
+
+          {data.evaluation.evalDataInconsistent ? (
+            <div className="rounded-xl border border-amber-700/40 bg-amber-950/30 px-4 py-3 text-sm text-amber-400">
+              Evaluation data may be stale — another market has a higher stored profit than the recommended one. Re-run the evaluation pipeline to get a fresh recommendation.
             </div>
           ) : null}
 

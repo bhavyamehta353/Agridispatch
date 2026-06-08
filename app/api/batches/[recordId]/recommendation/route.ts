@@ -355,6 +355,7 @@ export async function GET(
       const computedProfit =
         netRev != null ? Math.round((netRev - logi) * 100) / 100 : null;
       const expectedProfit = storedProfit ?? computedProfit;
+      const hasStoredProfit = storedProfit != null;
 
       const temperatureC = num(getField(risk as Rec, "temperature_c", "avg_temp_c"));
       const humidityPct = num(getField(risk as Rec, "humidity_pct", "avg_humidity_pct"));
@@ -414,6 +415,7 @@ export async function GET(
         commissionAmount: commissionAmt,
         netRevenue: netRev,
         expectedProfit,
+        hasStoredProfit,
         feasible,
         decayRisk: decayBucketed,
         decayRaw,
@@ -453,6 +455,16 @@ export async function GET(
 
     const winnerCol = marketColumns.find((c) => c.marketId === winnerMarketId);
     const winnerName = winnerCol?.marketName ?? "—";
+
+    // Detect stale/corrupt eval data: recommended market should have the highest
+    // stored net_profit among feasible eval-backed markets.
+    const evalDataInconsistent: boolean = (() => {
+      if (!hasEvaluation || winnerMarketId == null) return false;
+      const best = marketColumns
+        .filter((m) => m.feasible && m.hasStoredProfit && m.expectedProfit != null)
+        .sort((a, b) => (b.expectedProfit ?? 0) - (a.expectedProfit ?? 0))[0];
+      return best != null && best.marketId !== winnerMarketId;
+    })();
 
     const feasibleSorted = profits
       .filter((p) => p.feasible)
@@ -545,6 +557,7 @@ export async function GET(
         marginOverNext: margin,
         closeCall:
           margin != null && margin < 500 && secondFeasibleRow != null,
+        evalDataInconsistent,
       },
       winnerCard: {
         marketName: winnerName,
